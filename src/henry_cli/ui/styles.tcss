@@ -1,0 +1,38 @@
+Screen {
+    background: $surface;
+}
+
+#pipeline, #telemetry, #logs {
+    border: round $primary;
+}
+
+StatusModal {
+    align: center middle;
+    background: $background 70%;
+}
+
+#status-container {
+    width: 30;
+    height: 8;
+    padding: 1 0 0 0;
+    background: $surface;
+    align: center middle;
+}
+
+#status-container.recording {
+    background: green;
+}
+
+#status-label {
+    width: 100%;
+    height: 1;
+    margin: 0 0 1 0;
+    text-align: center;
+}
+
+#status-container LoadingIndicator {
+    width: 100%;
+    height: 1;
+    color: white;
+    background: transparent;
+}
