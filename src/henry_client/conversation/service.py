@@ -27,8 +27,6 @@ from .ports import LanguageModel
 
 type ModelRequest = DoGenerate | None
 
-MODEL_THREAD_NAME = "ConversationService.model_worker"
-
 
 @dataclass(frozen=True, slots=True)
 class DoGenerate:
@@ -40,6 +38,8 @@ class ConversationServiceError(RuntimeError): ...
 
 
 class ConversationService(AbstractAsyncContextManager):
+    _MODEL_THREAD_NAME = "ConversationService.model_worker"
+
     def __init__(
         self,
         model: LanguageModel,
@@ -128,7 +128,7 @@ class ConversationService(AbstractAsyncContextManager):
             self._model_thread = threading.Thread(
                 target=self._model_worker,
                 args=(loop, model_ready),
-                name=MODEL_THREAD_NAME,
+                name=self._MODEL_THREAD_NAME,
             )
             assert self._model_thread is not None
             self._model_thread.start()

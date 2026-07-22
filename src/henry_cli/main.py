@@ -12,14 +12,15 @@ HENRY_PROFILE = Profile.build(
     kind=ProfileKind.DEFAULT,
     name="Henry",
     system_language="Polish",
+    wakeword_reply="Tak, Wielmożny Panie...",
+    wakeword_model="Hey_Henree_20260406_162745.onnx",
     voice_model="pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
 )
 
 
 APP_CONFIG = AppConfig(
     profile=HENRY_PROFILE,
-    # language_model="mlx-community/Qwen3.5-9B-OptiQ-4bit",
-    language_model="mlx-community/Qwen3.5-4B-MLX-4bit",
+    language_model="mlx-community/Qwen3.5-9B-OptiQ-4bit",
 )
 
 

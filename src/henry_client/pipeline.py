@@ -1,19 +1,22 @@
-from enum import IntEnum
+from enum import Enum, auto
 
 
-class PipelineStage(IntEnum):
-    CAPTURE = 1
-    RECORDING = 2
-    TRANSCRIPTION = 3
-    PROCESSING = 4
-    SYNTHESIS = 5
-    PLAYBACK = 6
+class PipelineStage(Enum):
+    CAPTURE = auto()
+    LISTENING = auto()
+    RECORDING = auto()
+    TRANSCRIPTION = auto()
+    PROCESSING = auto()
+    SYNTHESIS = auto()
+    PLAYBACK = auto()
 
     @property
     def label(self) -> str:
         match self:
             case PipelineStage.CAPTURE:
                 return "Capturing"
+            case PipelineStage.LISTENING:
+                return "Listening"
             case PipelineStage.RECORDING:
                 return "Recording"
             case PipelineStage.TRANSCRIPTION:
@@ -26,9 +29,9 @@ class PipelineStage(IntEnum):
                 return "Playback"
 
 
-class PipelineStageStatus(IntEnum):
-    UNKNOWN = 0
-    READY = 1
-    STARTED = 2
-    COMPLETED = 3
-    FAILED = -1
+class PipelineStageStatus(Enum):
+    UNKNOWN = auto()
+    READY = auto()
+    STARTED = auto()
+    COMPLETED = auto()
+    FAILED = auto()

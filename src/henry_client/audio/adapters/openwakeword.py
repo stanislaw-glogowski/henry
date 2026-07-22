@@ -8,21 +8,21 @@ from openwakeword.model import Model
 
 from henry_resources import ensure_model_path
 
-from ...audio import AudioChunk
+from ..domain import AudioChunk
 from ..ports import WakeWordModel
 
-MODELS_DIR = "openwakeword"
-MELSPEC_MODEL_PATH = "melspectrogram.onnx"
-EMBEDDING_MODEL_PATH = "embedding_model.onnx"
 
-
-class SileroWakeWordError(RuntimeError): ...
+class OpenWakeWordModelError(RuntimeError): ...
 
 
 class OpenWakeWordModel(WakeWordModel):
+    _MODELS_DIR = "openwakeword"
+    _MELSPEC_MODEL_PATH = "melspectrogram.onnx"
+    _EMBEDDING_MODEL_PATH = "embedding_model.onnx"
+    _NUM_CPU = 1
     _FRAME_SIZE = 1280
 
-    def __init__(self, model_path: str = "Hey_Henree_20260406_162745.onnx") -> None:
+    def __init__(self, model_path: str) -> None:
         self._model_path = model_path
         self._model: Model | None = None
         self._samples_buffer = np.empty(0, dtype=np.float32)
@@ -103,27 +103,25 @@ class OpenWakeWordModel(WakeWordModel):
 
     def _open(self) -> None:
         if self._model is not None:
-            raise SileroWakeWordError("Model is already loaded")
+            raise OpenWakeWordModelError("Model is already loaded")
 
         self._logger.debug("Loading model: model_path='{}'", self._model_path)
 
-        feature_options = {
-            "melspec_model_path": str(
-                ensure_model_path(MODELS_DIR, "melspectrogram.onnx")
-            ),
-            "embedding_model_path": str(
-                ensure_model_path(MODELS_DIR, "embedding_model.onnx")
-            ),
-            "ncpu": 1,
-            "device": "cpu",
-        }
+        melspec_path = ensure_model_path(self._MODELS_DIR, self._MELSPEC_MODEL_PATH)
+        embedding_path = ensure_model_path(self._MODELS_DIR, self._EMBEDDING_MODEL_PATH)
+        wakeword_path = ensure_model_path(self._MODELS_DIR, self._model_path)
 
         self._model = Model(
             inference_framework="onnx",
             wakeword_models=[
-                str(ensure_model_path(MODELS_DIR, self._model_path)),
+                str(wakeword_path),
             ],
-            **feature_options,
+            **{
+                "melspec_model_path": str(melspec_path),
+                "embedding_model_path": str(embedding_path),
+                "ncpu": self._NUM_CPU,
+                "device": "cpu",
+            },
         )
 
         self._logger.debug("Model READY")
@@ -138,6 +136,6 @@ class OpenWakeWordModel(WakeWordModel):
 
     def _require_model(self) -> Model:
         if self._model is None:
-            raise SileroWakeWordError("Model is not loaded")
+            raise OpenWakeWordModelError("Model is not loaded")
 
         return self._model

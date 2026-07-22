@@ -21,8 +21,10 @@ class TelemetryEvent(AppEvent): ...
 @dataclass(frozen=True, slots=True)
 class AudioCaptured(TelemetryEvent):
     samples_count: int
-    vad_score: float
-    is_speech: bool
+    speech_score: float
+    speech_detected: bool
+    wakeword_score: float | None
+    wakeword_detected: bool | None
 
 
 @dataclass(frozen=True, slots=True)

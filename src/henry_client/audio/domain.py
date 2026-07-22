@@ -38,20 +38,30 @@ class AudioFormat:
 class AudioFrame(AudioFormat):
     samples: AudioSamples
 
-    def build_chunk(self, is_speech: bool, vad_score: float) -> AudioChunk:
+    def build_chunk(
+        self,
+        speech_detected: bool,
+        speech_score: float,
+        wakeword_detected: bool | None,
+        wakeword_score: float | None,
+    ) -> AudioChunk:
         return AudioChunk(
             channels=self.channels,
             sample_rate=self.sample_rate,
             samples=self.samples,
-            is_speech=is_speech,
-            vad_score=vad_score,
+            speech_detected=speech_detected,
+            speech_score=speech_score,
+            wakeword_detected=wakeword_detected,
+            wakeword_score=wakeword_score,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class AudioChunk(AudioFrame):
-    is_speech: bool
-    vad_score: float
+    speech_detected: bool
+    speech_score: float
+    wakeword_detected: bool | None
+    wakeword_score: float | None
 
 
 class AudioBuffer:

@@ -16,9 +16,9 @@ from .state import PipelineState
 
 TABLE_LABEL_WIDTH = 22
 
-VAD_SCORE_WIDTH = 27
-VAD_DEFAULT_STYLE = "cyan"
-VAD_DETECTED_STYLE = "green"
+SCORE_WIDTH = 27
+SCORE_DEFAULT_STYLE = "cyan"
+SCORE_DETECTED_STYLE = "green"
 
 PIPELINE_STATUS_SEGMENT_WIDTH = 9
 PIPELINE_STATUS_STYLES = {
@@ -112,7 +112,13 @@ class TelemetryPanel(Static):
         table.add_column(justify="left")
         table.add_row(
             "Voice Activity",
-            self._render_vad_bar(),
+            self._render_bar(self.snapshot.speech_score, self.snapshot.speech_detected),
+        )
+        table.add_row(
+            "Wake Word",
+            self._render_bar(
+                self.snapshot.wakeword_score, self.snapshot.wakeword_detected
+            ),
         )
         table.add_row(
             "Captured Samples",
@@ -124,25 +130,26 @@ class TelemetryPanel(Static):
         )
         return table
 
-    def _render_vad_bar(self) -> Text:
+    @staticmethod
+    def _render_bar(score: float, detected: bool) -> Text:
         bar = StatusBar()
 
-        active_width = round(self.snapshot.vad_score * VAD_SCORE_WIDTH)
+        active_width = round(score * SCORE_WIDTH)
 
-        if self.snapshot.is_speech:
+        if detected:
             bar.add_active(
                 segment_width=active_width,
-                style=VAD_DETECTED_STYLE,
+                style=SCORE_DETECTED_STYLE,
             )
         else:
             bar.add_active(
                 segment_width=active_width,
-                style=VAD_DEFAULT_STYLE,
+                style=SCORE_DEFAULT_STYLE,
             )
 
-        bar.add_inactive(VAD_SCORE_WIDTH - active_width)
+        bar.add_inactive(SCORE_WIDTH - active_width)
 
-        return bar.finish(f"{self.snapshot.vad_score:.3f}")
+        return bar.finish(f"{score:.3f}")
 
 
 class StatusModal(ModalScreen[None]):

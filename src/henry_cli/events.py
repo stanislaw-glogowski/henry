@@ -12,36 +12,49 @@ from henry_client.events import (
 
 @dataclass(frozen=True, slots=True)
 class TelemetrySnapshot:
-    vad_score: float = 0.0
-    is_speech: bool = False
     captured_sample_count: int = 0
     played_sample_count: int = 0
+    speech_score: float = 0.0
+    speech_detected: bool = False
+    wakeword_score: float = 0.0
+    wakeword_detected: bool = False
 
 
 class EventBridge(AppEventSink):
     def __init__(self):
-        self._vad_score = 0.0
-        self._is_speech = False
         self._captured_sample_count = 0
         self._played_sample_count = 0
+        self._speech_score = 0.0
+        self._speech_detected = False
+        self._wakeword_score = 0.0
+        self._wakeword_detected = False
         self._queue: asyncio.Queue[AppEvent] = asyncio.Queue()
 
     @property
     def telemetry_snapshot(self) -> TelemetrySnapshot:
         return TelemetrySnapshot(
-            vad_score=self._vad_score,
-            is_speech=self._is_speech,
             captured_sample_count=self._captured_sample_count,
             played_sample_count=self._played_sample_count,
+            speech_score=self._speech_score,
+            speech_detected=self._speech_detected,
+            wakeword_score=self._wakeword_score,
+            wakeword_detected=self._wakeword_detected,
         )
 
     def publish(self, *events: AppEvent) -> None:
         for event in events:
             match event:
                 case AudioCaptured():
-                    self._vad_score = event.vad_score
-                    self._is_speech = event.is_speech
+                    self._speech_score = event.speech_score
+                    self._speech_detected = event.speech_detected
                     self._captured_sample_count += event.samples_count
+                    if (
+                        event.wakeword_detected is not None
+                        and event.wakeword_score is not None
+                    ):
+                        self._wakeword_score = event.wakeword_score
+                        self._wakeword_detected = event.wakeword_detected
+
                 case AudioPlayed():
                     self._played_sample_count += event.samples_count
                 case TelemetryEvent():

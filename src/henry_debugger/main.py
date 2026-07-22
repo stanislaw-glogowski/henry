@@ -17,17 +17,18 @@ from henry_client import (
 
 LOG_LEVEL = "DEBUG"
 
-HENRY_PROFILE = Profile.build(
-    kind=ProfileKind.DEFAULT,
-    name="Henry",
+ALEXA_PROFILE = Profile.build(
+    kind=ProfileKind.SARCASTIC,
+    name="Alexa",
     system_language="Polish",
-    voice_model="pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
+    wakeword_model="alexa_v0.1.onnx",
+    wakeword_reply="Tak Słucham...",
+    voice_model="pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
 )
 
 
 APP_CONFIG = AppConfig(
-    profile=HENRY_PROFILE,
-    # language_model="mlx-community/Qwen3.5-9B-OptiQ-4bit",
+    profile=ALEXA_PROFILE,
     language_model="mlx-community/Qwen3.5-4B-MLX-4bit",
 )
 

@@ -4,9 +4,6 @@ from enum import StrEnum
 type MessageReply = MessageChunk | MessageLine | str | None
 
 
-MAX_CONVERSATION_LEN = 5
-
-
 class MessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
@@ -28,12 +25,10 @@ class Message(MessageChunk):
 
 
 class ConversationStore:
-    def __init__(
-        self,
-        max_len: int = MAX_CONVERSATION_LEN,
-    ) -> None:
+    _MAX_LEN = 5
+
+    def __init__(self) -> None:
         self._messages: list[Message] = list()
-        self._max_len = max_len
 
     @property
     def messages(self) -> tuple[Message, ...]:
@@ -61,4 +56,4 @@ class ConversationStore:
         self._messages.clear()
 
     def _apply_limit(self) -> None:
-        del self._messages[: -self._max_len]
+        del self._messages[: -self._MAX_LEN]

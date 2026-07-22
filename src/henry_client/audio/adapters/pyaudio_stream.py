@@ -11,17 +11,6 @@ from ..domain import AudioFormat, AudioFrame
 from ..ports import InputStream, OutputStream
 from .pyaudio_session import PyAudioSession
 
-CHANNELS_NUM = 1
-
-DUPLEX_SAMPLE_RATE = 16_000
-DUPLEX_FRAMES_PER_BUFFER = 512
-
-INPUT_SAMPLE_RATE = 16_000
-INPUT_FRAMES_PER_BUFFER = 512
-
-OUTPUT_SAMPLE_RATE = 22_050
-OUTPUT_FRAMES_PER_BUFFER = 512
-
 
 class PyAudioStreamMode(StrEnum):
     DUPLEX = "duplex"
@@ -43,21 +32,37 @@ class PyAudioStreamMode(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PyAudioStreamConfig(AudioFormat):
-    sample_rate: int = DUPLEX_SAMPLE_RATE
-    frames_per_buffer: int = DUPLEX_FRAMES_PER_BUFFER
-    channels: int = CHANNELS_NUM
-    mode: PyAudioStreamMode = PyAudioStreamMode.DUPLEX
+    sample_rate: int
+    frames_per_buffer: int
+    channels: int
+    mode: PyAudioStreamMode
 
 
 class PyAudioStreamError(RuntimeError): ...
 
 
 class PyAudioStream(InputStream, OutputStream):
+    _CHANNELS_NUM = 1
+
+    _DUPLEX_SAMPLE_RATE = 16_000
+    _DUPLEX_FRAMES_PER_BUFFER = 512
+
+    _INPUT_SAMPLE_RATE = 16_000
+    _INPUT_FRAMES_PER_BUFFER = 512
+
+    _OUTPUT_SAMPLE_RATE = 22_050
+    _OUTPUT_FRAMES_PER_BUFFER = 512
+
     @staticmethod
     def duplex(session: PyAudioSession) -> PyAudioStream:
         return PyAudioStream(
             session,
-            PyAudioStreamConfig(),
+            PyAudioStreamConfig(
+                sample_rate=PyAudioStream._DUPLEX_SAMPLE_RATE,
+                frames_per_buffer=PyAudioStream._DUPLEX_FRAMES_PER_BUFFER,
+                channels=PyAudioStream._CHANNELS_NUM,
+                mode=PyAudioStreamMode.DUPLEX,
+            ),
         )
 
     @staticmethod
@@ -65,9 +70,9 @@ class PyAudioStream(InputStream, OutputStream):
         return PyAudioStream(
             session,
             PyAudioStreamConfig(
-                sample_rate=INPUT_SAMPLE_RATE,
-                frames_per_buffer=INPUT_FRAMES_PER_BUFFER,
-                channels=CHANNELS_NUM,
+                sample_rate=PyAudioStream._INPUT_SAMPLE_RATE,
+                frames_per_buffer=PyAudioStream._INPUT_FRAMES_PER_BUFFER,
+                channels=PyAudioStream._CHANNELS_NUM,
                 mode=PyAudioStreamMode.INPUT,
             ),
         )
@@ -77,9 +82,9 @@ class PyAudioStream(InputStream, OutputStream):
         return PyAudioStream(
             session,
             PyAudioStreamConfig(
-                sample_rate=OUTPUT_SAMPLE_RATE,
-                frames_per_buffer=OUTPUT_FRAMES_PER_BUFFER,
-                channels=CHANNELS_NUM,
+                sample_rate=PyAudioStream._OUTPUT_SAMPLE_RATE,
+                frames_per_buffer=PyAudioStream._OUTPUT_FRAMES_PER_BUFFER,
+                channels=PyAudioStream._CHANNELS_NUM,
                 mode=PyAudioStreamMode.OUTPUT,
             ),
         )

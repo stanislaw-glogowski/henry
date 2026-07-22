@@ -20,3 +20,13 @@ class VADModel(AbstractContextManager, ABC):
     @abstractmethod
     def predict(self, frame: AudioFrame) -> float:
         raise NotImplementedError
+
+
+class WakeWordModel(AbstractContextManager, ABC):
+    @abstractmethod
+    def predict(self, frame: AudioFrame) -> float:
+        raise NotImplementedError
+
+    @abstractmethod
+    def reset(self) -> None:
+        raise NotImplementedError

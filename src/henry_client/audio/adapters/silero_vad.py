@@ -10,13 +10,13 @@ from mlx_audio.vad.models.silero_vad import SileroVADState as ModelState
 from ..domain import AudioFrame
 from ..ports import VADModel
 
-MODEL_ID = "mlx-community/silero-vad"
-
 
 class SileroVADError(RuntimeError): ...
 
 
 class SileroVADModel(VADModel):
+    _MODEL_ID = "mlx-community/silero-vad"
+
     def __init__(self) -> None:
         self._model: Model | None = None
         self._state: ModelState | None = None
@@ -50,8 +50,8 @@ class SileroVADModel(VADModel):
             raise SileroVADError("Model is already loaded")
 
         with disable_progress_bars():
-            self._logger.debug("Loading model: model_id='{}'", MODEL_ID)
-            model = load(MODEL_ID)
+            self._logger.debug("Loading model: model_id='{}'", self._MODEL_ID)
+            model = load(self._MODEL_ID)
             assert isinstance(model, Model)
             self._model = model
 

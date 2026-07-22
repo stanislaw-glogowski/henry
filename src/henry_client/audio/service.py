@@ -16,15 +16,13 @@ from henry_common.concurrency import (
 )
 
 from .domain import AudioChunk, AudioFrame
-from .ports import InputStream, OutputStream, VADModel
+from .ports import InputStream, OutputStream, VADModel, WakeWordModel
+
+VAD_THRESHOLD = 0.5
+WAKEWORD_THRESHOLD = 0.75
 
 type InputRequest = DoRead | None
 type OutputRequest = DoWrite | None
-
-VAD_THRESHOLD = 0.5
-
-INPUT_THREAD_NAME = "AudioService.input_worker"
-OUTPUT_THREAD_NAME = "AudioService.output_worker"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,12 +40,17 @@ class AudioServiceError(RuntimeError): ...
 
 
 class AudioService(AbstractAsyncContextManager):
+    _INPUT_THREAD_NAME = "AudioService.input_worker"
+    _OUTPUT_THREAD_NAME = "AudioService.output_worker"
+
     def __init__(
         self,
         input_stream: InputStream,
         output_stream: OutputStream,
         vad_model: VADModel,
+        wakeword_model: WakeWordModel,
         vad_threshold=VAD_THRESHOLD,
+        wakeword_threshold=WAKEWORD_THRESHOLD,
     ) -> None:
         self._input_stream = input_stream
         self._input_cancel = threading.Event()
@@ -60,6 +63,11 @@ class AudioService(AbstractAsyncContextManager):
 
         self._vad_model = vad_model
         self._vad_threshold = vad_threshold
+
+        self._wakeword_disabled = threading.Event()
+        self._wakeword_model = wakeword_model
+        self._wakeword_threshold = wakeword_threshold
+
         self._logger = logger.bind(component="AudioService")
 
     async def __aenter__(self) -> Self:
@@ -97,6 +105,10 @@ class AudioService(AbstractAsyncContextManager):
         self._output_requests.put_nowait(request)
         await request.response
 
+    def enable_wakeword(self) -> None:
+        self._wakeword_model.reset()
+        self._wakeword_disabled.clear()
+
     async def _start(self) -> None:
         if self._input_thread is not None or self._output_thread is not None:
             raise AudioServiceError("Workers already started")
@@ -114,7 +126,7 @@ class AudioService(AbstractAsyncContextManager):
             self._input_thread = threading.Thread(
                 target=self._input_worker,
                 args=(loop, input_ready),
-                name=INPUT_THREAD_NAME,
+                name=self._INPUT_THREAD_NAME,
             )
             assert self._input_thread is not None
             self._input_thread.start()
@@ -124,7 +136,7 @@ class AudioService(AbstractAsyncContextManager):
             self._output_thread = threading.Thread(
                 target=self._output_worker,
                 args=(loop, output_ready),
-                name=OUTPUT_THREAD_NAME,
+                name=self._OUTPUT_THREAD_NAME,
             )
             assert self._output_thread is not None
             self._output_thread.start()
@@ -148,14 +160,19 @@ class AudioService(AbstractAsyncContextManager):
             self._output_thread = None
             self._logger.debug("Output worker STOPPED")
 
+        self.enable_wakeword()
+
     def _input_worker(
         self,
         loop: asyncio.AbstractEventLoop,
         ready: asyncio.Future[None],
     ) -> None:
+        request: InputRequest = None
+
         try:
             with (
                 self._input_stream as stream,
+                self._wakeword_model as wakeword_model,
                 self._vad_model as vad_model,
             ):
                 loop.call_soon_threadsafe(
@@ -181,21 +198,45 @@ class AudioService(AbstractAsyncContextManager):
                                 break
 
                             frame = stream.read()
-                            vad_score = vad_model.predict(frame)
-                            is_speech = vad_score >= self._vad_threshold
+                            speech_score = vad_model.predict(frame)
+                            speech_detected = speech_score >= self._vad_threshold
+
+                            wakeword_detected: bool | None = None
+                            wakeword_score: float | None = None
+
+                            if not self._wakeword_disabled.is_set():
+                                score = wakeword_model.predict(frame)
+
+                                wakeword_score = score
+                                wakeword_detected = (
+                                    speech_detected
+                                    and score >= self._wakeword_threshold
+                                )
+                                if wakeword_detected:
+                                    self._wakeword_disabled.set()
 
                             loop.call_soon_threadsafe(
                                 request.response.put_nowait,
-                                frame.build_chunk(is_speech, vad_score),
+                                frame.build_chunk(
+                                    speech_detected=speech_detected,
+                                    speech_score=speech_score,
+                                    wakeword_detected=wakeword_detected,
+                                    wakeword_score=wakeword_score,
+                                ),
                             )
                     finally:
                         self._input_requests.task_done()
-        except BaseException as error:
+        except BaseException as err:
             loop.call_soon_threadsafe(
                 set_future_exception_if_pending,
                 ready,
-                error,
+                err,
             )
+            if request is not None:
+                loop.call_soon_threadsafe(
+                    request.response.put_nowait,
+                    err,
+                )
 
     def _output_worker(
         self,

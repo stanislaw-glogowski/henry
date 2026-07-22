@@ -27,7 +27,7 @@ class SpeechSegmenter:
         if not self._speech_started:
             self._pending_chunks.append(chunk)
 
-            if chunk.is_speech:
+            if chunk.speech_detected:
                 self._start_speech_frames += 1
                 if self._start_speech_frames >= self._MIN_START_SPEECH_FRAMES:
                     self._speech_started = True
@@ -47,7 +47,7 @@ class SpeechSegmenter:
 
         self._chunks.append(chunk)
 
-        if chunk.is_speech:
+        if chunk.speech_detected:
             self._end_silence_frames = 0
         else:
             self._end_silence_frames += 1

@@ -1,4 +1,5 @@
 import asyncio
+from enum import Enum, auto
 
 from loguru import logger
 
@@ -11,14 +12,25 @@ from .pipeline import PipelineStage, PipelineStageStatus
 from .speech.service import SpeechService
 
 
-# time.perf_counter()
+class ListeningMode(Enum):
+    UNKNOWN = auto()
+    WAKEWORD = auto()
+    UTTERANCE = auto()
+    PAUSED = auto()
+
+
 class Orchestrator:
+    _WAKEWORD_REPLY_TRIGGER = "WAKEWORD_REPLY"
+    _WAKEWORD_REPLY_START_DELAY_SECONDS = 0.5
+    _WAKEWORD_REPLY_END_DELAY_SECONDS = 0.5
+
     def __init__(
         self,
         audio: AudioService,
         conversation: ConversationService,
         speech: SpeechService,
         events: AppEventSink,
+        wakeword_reply_text: str | None = None,
     ):
         self._audio = audio
         self._conversation = conversation
@@ -31,12 +43,18 @@ class Orchestrator:
         self._segments: asyncio.Queue[AudioFrame] = asyncio.Queue()
         self._processing: asyncio.Queue[str] = asyncio.Queue()
         self._replaying: asyncio.Queue[str | None] = asyncio.Queue()
-        self._recording = asyncio.Event()
+
+        self._wakeword_reply_text = wakeword_reply_text
+        self._wakeword_reply_frames: list[AudioFrame] = []
+
+        self._listening_mode = ListeningMode.UNKNOWN
 
     async def run(
         self,
         shutdown: asyncio.Event,
     ) -> None:
+        await self._preload_wakeword_reply()
+
         async with asyncio.TaskGroup() as group:
             self._logger.debug("Running tasks")
 
@@ -55,7 +73,7 @@ class Orchestrator:
                 ),
             ]
 
-            self._set_recording(True)
+            self._set_listening_mode(ListeningMode.WAKEWORD)
 
             await shutdown.wait()
 
@@ -64,28 +82,55 @@ class Orchestrator:
             for task in tasks:
                 task.cancel()
 
-    def _set_recording(self, recording: bool) -> None:
-        if recording == self._recording.is_set():
+    async def _preload_wakeword_reply(self) -> None:
+        if not self._wakeword_reply_text:
             return
 
-        if recording:
-            self._recording.set()
+        self._logger.debug("Preloading wakeword reply")
 
-            self._logger.debug("Recording STARTED")
-            self._events.publish(
-                PipelineStageChanged(
-                    PipelineStage.RECORDING, PipelineStageStatus.STARTED
-                )
-            )
-        else:
-            self._recording.clear()
+        async for frame in self._speech.synthesize(self._wakeword_reply_text):
+            self._wakeword_reply_frames.append(frame)
 
-            self._logger.debug("Recording STOPPED")
-            self._events.publish(
-                PipelineStageChanged(
-                    PipelineStage.RECORDING, PipelineStageStatus.COMPLETED
+    def _set_listening_mode(self, mode: ListeningMode) -> bool:
+        if mode == self._listening_mode:
+            return False
+
+        match self._listening_mode:
+            case ListeningMode.WAKEWORD:
+                self._logger.debug("Listening COMPLETED")
+                self._events.publish(
+                    PipelineStageChanged(
+                        PipelineStage.LISTENING, PipelineStageStatus.COMPLETED
+                    )
                 )
-            )
+
+            case ListeningMode.UTTERANCE:
+                self._logger.debug("Recording COMPLETED")
+                self._events.publish(
+                    PipelineStageChanged(
+                        PipelineStage.RECORDING, PipelineStageStatus.COMPLETED
+                    )
+                )
+
+        match mode:
+            case ListeningMode.WAKEWORD:
+                self._logger.debug("Listening STARTED")
+                self._events.publish(
+                    PipelineStageChanged(
+                        PipelineStage.LISTENING, PipelineStageStatus.STARTED
+                    )
+                )
+
+            case ListeningMode.UTTERANCE:
+                self._logger.debug("Recording STARTED")
+                self._events.publish(
+                    PipelineStageChanged(
+                        PipelineStage.RECORDING, PipelineStageStatus.STARTED
+                    )
+                )
+
+        self._listening_mode = mode
+        return True
 
     async def _capture_loop(
         self,
@@ -104,21 +149,23 @@ class Orchestrator:
             self._events.publish(
                 AudioCaptured(
                     samples_count=len(chunk.samples),
-                    vad_score=chunk.vad_score,
-                    is_speech=chunk.is_speech,
+                    speech_score=chunk.speech_score,
+                    speech_detected=chunk.speech_detected,
+                    wakeword_score=chunk.wakeword_score,
+                    wakeword_detected=chunk.wakeword_detected,
                 )
             )
 
-            if not self._recording.is_set():
-                continue
-
-            segment_ended, segment = self._speech.detect(chunk)
-            if not segment_ended or segment is None:
-                continue
-
-            self._set_recording(False)
-
-            self._segments.put_nowait(segment)
+            match self._listening_mode:
+                case ListeningMode.WAKEWORD:
+                    if chunk.wakeword_detected:
+                        self._set_listening_mode(ListeningMode.PAUSED)
+                        self._replaying.put_nowait(self._WAKEWORD_REPLY_TRIGGER)
+                case ListeningMode.UTTERANCE:
+                    segment_ended, segment = self._speech.detect(chunk)
+                    if segment_ended and segment is not None:
+                        self._set_listening_mode(ListeningMode.PAUSED)
+                        self._segments.put_nowait(segment)
 
         self._events.publish(
             PipelineStageChanged(PipelineStage.CAPTURE, PipelineStageStatus.COMPLETED)
@@ -148,7 +195,7 @@ class Orchestrator:
 
                 if text is None:
                     self._logger.debug("Transcribing COMPLETED: text=None")
-                    self._set_recording(True)
+                    self._set_listening_mode(ListeningMode.UTTERANCE)
                 else:
                     self._logger.debug("Transcribing COMPLETED: text='{}'", text)
                     await self._processing.put(text)
@@ -213,56 +260,64 @@ class Orchestrator:
         while not shutdown.is_set():
             line = await self._replaying.get()
             try:
-                if line is None:
-                    if playing:
-                        playing = False
-                        self._logger.debug("Playback COMPLETED")
+                match line:
+                    case self._WAKEWORD_REPLY_TRIGGER:
+                        await asyncio.sleep(self._WAKEWORD_REPLY_START_DELAY_SECONDS)
+                        for frame in self._wakeword_reply_frames:
+                            await self._audio.write(frame)
+                        await asyncio.sleep(self._WAKEWORD_REPLY_END_DELAY_SECONDS)
+                        self._set_listening_mode(ListeningMode.UTTERANCE)
+
+                    case str():
+                        self._logger.debug("Synthesising STARTED")
                         self._events.publish(
                             PipelineStageChanged(
-                                PipelineStage.PLAYBACK, PipelineStageStatus.COMPLETED
+                                PipelineStage.SYNTHESIS,
+                                PipelineStageStatus.STARTED,
                             )
                         )
-                    self._set_recording(True)
-                else:
-                    self._logger.debug("Synthesising STARTED")
-                    self._events.publish(
-                        PipelineStageChanged(
-                            PipelineStage.SYNTHESIS,
-                            PipelineStageStatus.STARTED,
-                        )
-                    )
 
-                    frames = self._speech.synthesize(line)
+                        frames = self._speech.synthesize(line)
 
-                    async for frame in frames:
-                        self._logger.debug(
-                            "Synthesis: samples=[{}]",
-                            len(frame.samples),
-                        )
-                        if not playing:
-                            playing = True
-                            self._logger.debug("Playback STARTED")
+                        async for frame in frames:
+                            self._logger.debug(
+                                "Synthesis: samples=[{}]",
+                                len(frame.samples),
+                            )
+                            if not playing:
+                                playing = True
+                                self._logger.debug("Playback STARTED")
+                                self._events.publish(
+                                    PipelineStageChanged(
+                                        PipelineStage.PLAYBACK,
+                                        PipelineStageStatus.STARTED,
+                                    )
+                                )
+
+                            await self._audio.write(frame)
                             self._events.publish(
-                                PipelineStageChanged(
-                                    PipelineStage.PLAYBACK,
-                                    PipelineStageStatus.STARTED,
+                                AudioPlayed(
+                                    samples_count=len(frame.samples),
                                 )
                             )
 
-                        await self._audio.write(frame)
+                        self._logger.debug("Synthesising COMPLETED")
                         self._events.publish(
-                            AudioPlayed(
-                                samples_count=len(frame.samples),
+                            PipelineStageChanged(
+                                PipelineStage.SYNTHESIS,
+                                PipelineStageStatus.COMPLETED,
                             )
                         )
-
-                    self._logger.debug("Synthesising COMPLETED")
-                    self._events.publish(
-                        PipelineStageChanged(
-                            PipelineStage.SYNTHESIS,
-                            PipelineStageStatus.COMPLETED,
-                        )
-                    )
-
+                    case None:
+                        if playing:
+                            playing = False
+                            self._logger.debug("Playback COMPLETED")
+                            self._events.publish(
+                                PipelineStageChanged(
+                                    PipelineStage.PLAYBACK,
+                                    PipelineStageStatus.COMPLETED,
+                                )
+                            )
+                        self._set_listening_mode(ListeningMode.UTTERANCE)
             finally:
                 self._replaying.task_done()

@@ -11,13 +11,13 @@ from mlx_audio.stt.utils import load_model
 from ...audio import AudioFrame
 from ..ports import STTModel
 
-MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
-
 
 class ParakeetSTTError(RuntimeError): ...
 
 
 class ParakeetSTTModel(STTModel):
+    _MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
+
     def __init__(self) -> None:
         self._model: Model | None = None
         self._logger = logger.bind(component="ParakeetSTTModel")
@@ -54,8 +54,8 @@ class ParakeetSTTModel(STTModel):
             raise ParakeetSTTError("Model is already loaded")
 
         with disable_progress_bars():
-            self._logger.debug("Loading model: model_id='{}'", MODEL_ID)
-            model = load_model(MODEL_ID)
+            self._logger.debug("Loading model: model_id='{}'", self._MODEL_ID)
+            model = load_model(self._MODEL_ID)
             assert isinstance(model, Model)
             self._model = model
 
