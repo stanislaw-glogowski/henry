@@ -43,9 +43,49 @@ microphone, speakers, Metal, ONNX models, or downloaded Hugging Face models.
 uv sync
 ```
 
-Piper voices and MLX models are downloaded and cached by their respective
-libraries on first use. OpenWakeWord feature and wake-word models are expected in
-Henry's data directory:
+## Model setup
+
+Download the MLX and Piper models before starting Henry. The `hf` CLI is provided
+by the installed `huggingface-hub` dependency, and `uv run hf download` stores
+models in the same Hugging Face cache that Henry's adapters use at runtime.
+
+### Model inventory
+
+| Pipeline stage | Model or repository | Purpose and recommendation |
+| --- | --- | --- |
+| Wake word | Custom `.onnx` from [openwakeword.com](https://openwakeword.com/) | Recommended source for a custom activation phrase |
+| Wake word | [`alexa_v0.1.onnx`](https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_v0.1.onnx) | Official pre-trained openWakeWord model for "Alexa"; useful for the debugger |
+| VAD | [`mlx-community/silero-vad`](https://huggingface.co/mlx-community/silero-vad) | Fixed model used for voice activity detection |
+| STT | [`mlx-community/parakeet-tdt-0.6b-v3`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) | Fixed multilingual speech-to-text model, including Polish |
+| Language model | [`mlx-community/Qwen3.5-4B-MLX-4bit`](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit) | Smaller and lower-quality model; suitable for debugging |
+| Language model | [`mlx-community/Qwen3.5-9B-OptiQ-4bit`](https://huggingface.co/mlx-community/Qwen3.5-9B-OptiQ-4bit) | Recommended default with sufficient response quality |
+| Voice | [`rhasspy/piper-voices`](https://huggingface.co/rhasspy/piper-voices/tree/main) | Repository containing Piper voices; Henry supports repository-relative model paths |
+
+### Downloading Hugging Face models
+
+Download the VAD, STT, and the language model required by the application you
+want to run:
+
+```bash
+uv run hf download mlx-community/silero-vad
+uv run hf download mlx-community/parakeet-tdt-0.6b-v3
+uv run hf download mlx-community/Qwen3.5-4B-MLX-4bit
+uv run hf download mlx-community/Qwen3.5-9B-OptiQ-4bit
+```
+
+Piper voices consist of an ONNX file and its adjacent `.onnx.json`
+configuration. High quality is recommended; medium quality is a smaller
+alternative.
+
+| Quality | `--voice-model` / `HENRY_VOICE_MODEL` value | Download command |
+| --- | --- | --- |
+| Medium | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` | `uv run hf download rhasspy/piper-voices pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx.json` |
+| High (recommended) | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` | `uv run hf download rhasspy/piper-voices pl/pl_PL/bass/high/pl_PL-bass-high.onnx pl/pl_PL/bass/high/pl_PL-bass-high.onnx.json` |
+
+### Downloading OpenWakeWord models
+
+OpenWakeWord models do not use the Hugging Face cache. Henry expects the wake-word
+model and the two shared feature models in its data directory:
 
 ```text
 .henry/
@@ -55,6 +95,24 @@ Henry's data directory:
         ├── melspectrogram.onnx
         └── <wake-word-model>.onnx
 ```
+
+The official openWakeWord project provides pre-trained models through its
+[GitHub releases](https://github.com/dscripka/openWakeWord/releases). For
+example, install the pre-trained Alexa model and its required feature models with:
+
+```bash
+mkdir -p .henry/models/openwakeword
+curl -L https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx \
+  -o .henry/models/openwakeword/melspectrogram.onnx
+curl -L https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx \
+  -o .henry/models/openwakeword/embedding_model.onnx
+curl -L https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_v0.1.onnx \
+  -o .henry/models/openwakeword/alexa_v0.1.onnx
+```
+
+Models created at [openwakeword.com](https://openwakeword.com/) should be copied
+to the same directory and selected by filename with `--wakeword-model` or
+`HENRY_WAKEWORD_MODEL`.
 
 The data directory is resolved in this order:
 
@@ -82,8 +140,28 @@ Both applications handle `SIGINT` and `SIGTERM`. Press `q` in the terminal UI or
 use `Ctrl+C` to request shutdown.
 
 Profiles configure the assistant name, system prompt style, wake-word model,
-spoken activation reply, and Piper voice. The current CLI and debugger profiles
-live in `src/henry_cli/main.py` and `src/henry_debugger/main.py`.
+spoken activation reply, and Piper voice. Command-line arguments take precedence
+over environment variables, which take precedence over the application defaults.
+
+| Command-line argument | Environment variable | CLI default | Debugger default |
+| --- | --- | --- | --- |
+| `--log-level` | `HENRY_LOG_LEVEL` | `DEBUG` | `DEBUG` |
+| `--profile-kind` | `HENRY_PROFILE_KIND` | `default` | `sarcastic` |
+| `--profile-name` | `HENRY_PROFILE_NAME` | `Henry` | `Alexa` |
+| `--system-language` | `HENRY_SYSTEM_LANGUAGE` | `Polish` | `Polish` |
+| `--wakeword-reply` | `HENRY_WAKEWORD_REPLY` | `Tak, Wielmożny Panie...` | `Tak Słucham...` |
+| `--wakeword-model` | `HENRY_WAKEWORD_MODEL` | `Hey_Henree_20260406_162745.onnx` | `alexa_v0.1.onnx` |
+| `--voice-model` | `HENRY_VOICE_MODEL` | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` |
+| `--language-model` | `HENRY_LANGUAGE_MODEL` | `mlx-community/Qwen3.5-9B-OptiQ-4bit` | `mlx-community/Qwen3.5-4B-MLX-4bit` |
+
+For example:
+
+```bash
+HENRY_PROFILE_NAME=Ada uv run henry-cli --language-model local/model
+uv run henry-debugger --log-level TRACE --wakeword-model alexa_v0.1.onnx
+```
+
+Run either command with `--help` for the complete argument reference.
 
 ## Architecture
 

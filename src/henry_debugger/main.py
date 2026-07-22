@@ -1,7 +1,9 @@
+import argparse
 import asyncio
+import os
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import loguru
 from loguru import logger
@@ -13,23 +15,6 @@ from henry_client import (
     AppEventSink,
     Profile,
     ProfileKind,
-)
-
-LOG_LEVEL = "DEBUG"
-
-ALEXA_PROFILE = Profile.build(
-    kind=ProfileKind.SARCASTIC,
-    name="Alexa",
-    system_language="Polish",
-    wakeword_model="alexa_v0.1.onnx",
-    wakeword_reply="Tak Słucham...",
-    voice_model="pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
-)
-
-
-APP_CONFIG = AppConfig(
-    profile=ALEXA_PROFILE,
-    language_model="mlx-community/Qwen3.5-4B-MLX-4bit",
 )
 
 
@@ -44,6 +29,7 @@ class EventLogger(AppEventSink):
 
 def configure_logger(
     record_filter: Callable[[str, str], bool] | None = None,
+    level: str = "DEBUG",
 ) -> loguru.Logger:
     def _filter(record: loguru.Record) -> bool:
         if record_filter is None:
@@ -63,7 +49,7 @@ def configure_logger(
     )
     logger.add(
         sys.stdout,
-        level=LOG_LEVEL,
+        level=level,
         format=(
             "<green>{time:HH:mm:ss.SSS}</green> | "
             "<level>{level: <6}</level> | "
@@ -89,16 +75,81 @@ def configure_shutdown() -> asyncio.Event:
     return shutdown
 
 
-async def run() -> None:
+async def run(config: argparse.Namespace) -> None:
     """Run the assistant with event logging instead of the terminal UI."""
-    configure_logger()
+    configure_logger(level=config.log_level)
 
-    await App(config=APP_CONFIG, events=EventLogger()).run(configure_shutdown())
+    await App(
+        config=AppConfig(
+            profile=Profile.build(
+                kind=ProfileKind[config.profile_kind.upper()],
+                name=config.profile_name,
+                system_language=config.system_language,
+                wakeword_model=config.wakeword_model,
+                wakeword_reply=config.wakeword_reply,
+                voice_model=config.voice_model,
+            ),
+            language_model=config.language_model,
+        ),
+        events=EventLogger(),
+    ).run(configure_shutdown())
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Console-script entry point."""
-    asyncio.run(run())
+    asyncio.run(run(_parse_args(argv)))
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Henry with event logging.")
+    profile_kinds = [kind.name.lower() for kind in ProfileKind]
+    parser.add_argument(
+        "--log-level",
+        default=os.getenv("HENRY_LOG_LEVEL", "DEBUG"),
+        help="Log level (env: HENRY_LOG_LEVEL).",
+    )
+    parser.add_argument(
+        "--profile-kind",
+        choices=profile_kinds,
+        default=os.getenv("HENRY_PROFILE_KIND", "sarcastic").lower(),
+        help="Assistant profile kind (env: HENRY_PROFILE_KIND).",
+    )
+    parser.add_argument(
+        "--profile-name",
+        default=os.getenv("HENRY_PROFILE_NAME", "Alexa"),
+        help="Assistant name (env: HENRY_PROFILE_NAME).",
+    )
+    parser.add_argument(
+        "--system-language",
+        default=os.getenv("HENRY_SYSTEM_LANGUAGE", "Polish"),
+        help="Language used in the system prompt (env: HENRY_SYSTEM_LANGUAGE).",
+    )
+    parser.add_argument(
+        "--wakeword-reply",
+        default=os.getenv("HENRY_WAKEWORD_REPLY", "Tak Słucham..."),
+        help="Reply after wake-word detection (env: HENRY_WAKEWORD_REPLY).",
+    )
+    parser.add_argument(
+        "--wakeword-model",
+        default=os.getenv("HENRY_WAKEWORD_MODEL", "alexa_v0.1.onnx"),
+        help="Wake-word model path (env: HENRY_WAKEWORD_MODEL).",
+    )
+    parser.add_argument(
+        "--voice-model",
+        default=os.getenv(
+            "HENRY_VOICE_MODEL", "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx"
+        ),
+        help="Piper voice model path (env: HENRY_VOICE_MODEL).",
+    )
+    parser.add_argument(
+        "--language-model",
+        default=os.getenv("HENRY_LANGUAGE_MODEL", "mlx-community/Qwen3.5-4B-MLX-4bit"),
+        help="MLX language model id or path (env: HENRY_LANGUAGE_MODEL).",
+    )
+    config = parser.parse_args(argv)
+    if config.profile_kind not in profile_kinds:
+        parser.error("HENRY_PROFILE_KIND must be one of: " + ", ".join(profile_kinds))
+    return config
 
 
 if __name__ == "__main__":

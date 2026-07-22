@@ -1,37 +1,33 @@
+import argparse
 import asyncio
+import os
 import signal
+from collections.abc import Sequence
 
 from henry_cli.events import EventBridge
 from henry_cli.logs import LogBuffer
 from henry_cli.ui import Layout
 from henry_client import App, AppConfig, Profile, ProfileKind
 
-LOG_LEVEL = "DEBUG"
 
-HENRY_PROFILE = Profile.build(
-    kind=ProfileKind.DEFAULT,
-    name="Henry",
-    system_language="Polish",
-    wakeword_reply="Tak, Wielmożny Panie...",
-    wakeword_model="Hey_Henree_20260406_162745.onnx",
-    voice_model="pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
-)
-
-
-APP_CONFIG = AppConfig(
-    profile=HENRY_PROFILE,
-    language_model="mlx-community/Qwen3.5-9B-OptiQ-4bit",
-)
-
-
-async def run() -> None:
+async def run(config: argparse.Namespace) -> None:
     """Run the terminal UI and assistant in one asyncio event loop."""
-    logs = LogBuffer(LOG_LEVEL)
+    logs = LogBuffer(config.log_level)
     events = EventBridge()
     shutdown = _configure_shutdown()
 
     app = App(
-        config=APP_CONFIG,
+        config=AppConfig(
+            profile=Profile.build(
+                kind=ProfileKind[config.profile_kind.upper()],
+                name=config.profile_name,
+                system_language=config.system_language,
+                wakeword_reply=config.wakeword_reply,
+                wakeword_model=config.wakeword_model,
+                voice_model=config.voice_model,
+            ),
+            language_model=config.language_model,
+        ),
         events=events,
     )
 
@@ -46,9 +42,63 @@ async def run() -> None:
         tasks.create_task(_stop_ui_on_shutdown(layout, shutdown))
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Console-script entry point."""
-    asyncio.run(run())
+    asyncio.run(run(_parse_args(argv)))
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Henry's terminal UI.")
+    profile_kinds = [kind.name.lower() for kind in ProfileKind]
+    parser.add_argument(
+        "--log-level",
+        default=os.getenv("HENRY_LOG_LEVEL", "DEBUG"),
+        help="Log level (env: HENRY_LOG_LEVEL).",
+    )
+    parser.add_argument(
+        "--profile-kind",
+        choices=profile_kinds,
+        default=os.getenv("HENRY_PROFILE_KIND", "default").lower(),
+        help="Assistant profile kind (env: HENRY_PROFILE_KIND).",
+    )
+    parser.add_argument(
+        "--profile-name",
+        default=os.getenv("HENRY_PROFILE_NAME", "Henry"),
+        help="Assistant name (env: HENRY_PROFILE_NAME).",
+    )
+    parser.add_argument(
+        "--system-language",
+        default=os.getenv("HENRY_SYSTEM_LANGUAGE", "Polish"),
+        help="Language used in the system prompt (env: HENRY_SYSTEM_LANGUAGE).",
+    )
+    parser.add_argument(
+        "--wakeword-reply",
+        default=os.getenv("HENRY_WAKEWORD_REPLY", "Tak, Wielmożny Panie..."),
+        help="Reply after wake-word detection (env: HENRY_WAKEWORD_REPLY).",
+    )
+    parser.add_argument(
+        "--wakeword-model",
+        default=os.getenv("HENRY_WAKEWORD_MODEL", "Hey_Henree_20260406_162745.onnx"),
+        help="Wake-word model path (env: HENRY_WAKEWORD_MODEL).",
+    )
+    parser.add_argument(
+        "--voice-model",
+        default=os.getenv(
+            "HENRY_VOICE_MODEL", "pl/pl_PL/bass/high/pl_PL-bass-high.onnx"
+        ),
+        help="Piper voice model path (env: HENRY_VOICE_MODEL).",
+    )
+    parser.add_argument(
+        "--language-model",
+        default=os.getenv(
+            "HENRY_LANGUAGE_MODEL", "mlx-community/Qwen3.5-9B-OptiQ-4bit"
+        ),
+        help="MLX language model id or path (env: HENRY_LANGUAGE_MODEL).",
+    )
+    config = parser.parse_args(argv)
+    if config.profile_kind not in profile_kinds:
+        parser.error("HENRY_PROFILE_KIND must be one of: " + ", ".join(profile_kinds))
+    return config
 
 
 def _configure_shutdown() -> asyncio.Event:
