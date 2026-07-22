@@ -54,6 +54,9 @@ class EventBridge(AppEventSink):
                     ):
                         self._wakeword_score = event.wakeword_score
                         self._wakeword_detected = event.wakeword_detected
+                    else:
+                        self._wakeword_score = 0.0
+                        self._wakeword_detected = False
 
                 case AudioPlayed():
                     self._played_sample_count += event.samples_count
@@ -62,5 +65,6 @@ class EventBridge(AppEventSink):
                 case _:
                     self._queue.put_nowait(event)
 
-    async def receive(self) -> AppEvent:  # noqa: F821
+    async def receive(self) -> AppEvent:
+        """Wait for the next non-telemetry application event."""
         return await self._queue.get()

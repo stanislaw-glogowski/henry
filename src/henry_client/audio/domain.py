@@ -15,6 +15,7 @@ class AudioFormat:
     channels: int
 
     def verify(self, other_format: AudioFormat) -> None:
+        """Raise when channels or sample rate differ from this format."""
         if other_format.channels != self.channels:
             raise AudioFormatError(
                 f"Incompatible channel count: expected {self.channels}, "

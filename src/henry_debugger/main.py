@@ -42,7 +42,7 @@ class EventLogger(AppEventSink):
             self._logger.trace("{}", event, event=event.__class__.__name__)
 
 
-def configure_loger(
+def configure_logger(
     record_filter: Callable[[str, str], bool] | None = None,
 ) -> loguru.Logger:
     def _filter(record: loguru.Record) -> bool:
@@ -89,11 +89,17 @@ def configure_shutdown() -> asyncio.Event:
     return shutdown
 
 
-async def main() -> None:
-    configure_loger()
+async def run() -> None:
+    """Run the assistant with event logging instead of the terminal UI."""
+    configure_logger()
 
     await App(config=APP_CONFIG, events=EventLogger()).run(configure_shutdown())
 
 
+def main() -> None:
+    """Console-script entry point."""
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

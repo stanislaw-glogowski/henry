@@ -178,7 +178,12 @@ class PyAudioStream(InputStream, OutputStream):
             raise PyAudioStreamError("Stream is not open")
 
         if mode is not None:
-            if mode.is_input != self._config.mode.is_input:
+            supported = (
+                self._config.mode.is_input
+                if mode is PyAudioStreamMode.INPUT
+                else self._config.mode.is_output
+            )
+            if not supported:
                 raise PyAudioStreamError(
                     f"Incompatible stream mode: expected {mode.value}, "
                     f"got {self._config.mode.value}"

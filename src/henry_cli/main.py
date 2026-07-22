@@ -24,7 +24,8 @@ APP_CONFIG = AppConfig(
 )
 
 
-async def main() -> None:
+async def run() -> None:
+    """Run the terminal UI and assistant in one asyncio event loop."""
     logs = LogBuffer(LOG_LEVEL)
     events = EventBridge()
     shutdown = _configure_shutdown()
@@ -43,6 +44,11 @@ async def main() -> None:
         tasks.create_task(app.run(shutdown))
         tasks.create_task(_run_ui(layout, shutdown))
         tasks.create_task(_stop_ui_on_shutdown(layout, shutdown))
+
+
+def main() -> None:
+    """Console-script entry point."""
+    asyncio.run(run())
 
 
 def _configure_shutdown() -> asyncio.Event:
@@ -77,4 +83,4 @@ async def _stop_ui_on_shutdown(
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

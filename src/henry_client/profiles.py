@@ -26,6 +26,7 @@ class Profile:
         kind: ProfileKind = ProfileKind.DEFAULT,
         system_prompt: str | None = None,
     ):
+        """Build a profile and derive its system prompt when one is not supplied."""
         if system_prompt is None:
             match kind:
                 case ProfileKind.DEFAULT:

@@ -109,7 +109,6 @@ class PiperTTSModel(TTSModel):
             return
 
         self._model = None
-        self._state = None
         self._logger.debug("Model CLOSED")
 
     def _require_model(self) -> PiperVoice:

@@ -65,6 +65,8 @@ class AudioService(AbstractAsyncContextManager):
         self._vad_threshold = vad_threshold
 
         self._wakeword_disabled = threading.Event()
+        self._wakeword_reset_requested = threading.Event()
+        self._wakeword_control_lock = threading.Lock()
         self._wakeword_model = wakeword_model
         self._wakeword_threshold = wakeword_threshold
 
@@ -83,6 +85,7 @@ class AudioService(AbstractAsyncContextManager):
         await self._stop()
 
     async def read(self) -> AsyncIterator[AudioChunk]:
+        """Stream microphone frames enriched with VAD and wake-word results."""
         request = DoRead(
             response=asyncio.Queue(),
         )
@@ -98,6 +101,7 @@ class AudioService(AbstractAsyncContextManager):
             request.response.task_done()
 
     async def write(self, frame: AudioFrame) -> None:
+        """Write one frame and wait until the output worker accepts it."""
         request = DoWrite(
             frame=frame,
             response=asyncio.Future(),
@@ -106,8 +110,10 @@ class AudioService(AbstractAsyncContextManager):
         await request.response
 
     def enable_wakeword(self) -> None:
-        self._wakeword_model.reset()
-        self._wakeword_disabled.clear()
+        """Re-arm wake-word detection; the input worker performs the model reset."""
+        with self._wakeword_control_lock:
+            self._wakeword_reset_requested.set()
+            self._wakeword_disabled.clear()
 
     async def _start(self) -> None:
         if self._input_thread is not None or self._output_thread is not None:
@@ -203,6 +209,11 @@ class AudioService(AbstractAsyncContextManager):
 
                             wakeword_detected: bool | None = None
                             wakeword_score: float | None = None
+
+                            with self._wakeword_control_lock:
+                                if self._wakeword_reset_requested.is_set():
+                                    wakeword_model.reset()
+                                    self._wakeword_reset_requested.clear()
 
                             if not self._wakeword_disabled.is_set():
                                 score = wakeword_model.predict(frame)

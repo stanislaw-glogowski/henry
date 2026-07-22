@@ -6,6 +6,7 @@ MODELS_DIR = "models"
 
 
 def ensure_model_path(*path_parts: str) -> Path:
+    """Resolve an existing model file below Henry's data directory."""
     path = locate_root() / MODELS_DIR
     path = path.joinpath(*path_parts)
 

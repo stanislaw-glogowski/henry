@@ -1,11 +1,10 @@
 [project]
 name = "henry-app"
 version = "0.1.0"
-description = ""
+description = "Local, privacy-first voice assistant for Apple Silicon Macs"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "asyncio>=4.0.0",
     "huggingface-hub>=1.24.0",
     "loguru>=0.7.3",
     "mlx-audio>=0.4.5",
@@ -15,7 +14,7 @@ dependencies = [
     "onnxruntime>=1.24.1,<2",
     "openwakeword==0.6.0",
     "piper-tts>=1.5.0",
-    "piper>=0.15.1",
+    "platformdirs>=4.0.0",
     "pyaudio>=0.2.14",
     "rich>=15.0.0",
     "textual>=8.2.8",

@@ -67,6 +67,7 @@ class ConversationService(AbstractAsyncContextManager):
         await self._stop()
 
     async def generate_reply(self, text: str) -> AsyncIterator[MessageReply]:
+        """Generate chunks, complete spoken lines, and the final reply text."""
         self._store.add_user_message(text)
 
         messages = self._store.messages
@@ -152,6 +153,8 @@ class ConversationService(AbstractAsyncContextManager):
         loop: asyncio.AbstractEventLoop,
         ready: asyncio.Future[None],
     ) -> None:
+        request: ModelRequest = None
+
         try:
             with self._model as model:
                 loop.call_soon_threadsafe(

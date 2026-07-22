@@ -19,8 +19,11 @@ class ListeningMode(Enum):
     PAUSED = auto()
 
 
+class _ReplaySignal(Enum):
+    WAKEWORD_REPLY = auto()
+
+
 class Orchestrator:
-    _WAKEWORD_REPLY_TRIGGER = "WAKEWORD_REPLY"
     _WAKEWORD_REPLY_START_DELAY_SECONDS = 0.5
     _WAKEWORD_REPLY_END_DELAY_SECONDS = 0.5
 
@@ -38,11 +41,9 @@ class Orchestrator:
         self._events = events
         self._logger = logger.bind(component="Orchestrator")
 
-        self._stages: dict[PipelineStage, PipelineStageStatus]
-
         self._segments: asyncio.Queue[AudioFrame] = asyncio.Queue()
         self._processing: asyncio.Queue[str] = asyncio.Queue()
-        self._replaying: asyncio.Queue[str | None] = asyncio.Queue()
+        self._replaying: asyncio.Queue[str | _ReplaySignal | None] = asyncio.Queue()
 
         self._wakeword_reply_text = wakeword_reply_text
         self._wakeword_reply_frames: list[AudioFrame] = []
@@ -53,6 +54,7 @@ class Orchestrator:
         self,
         shutdown: asyncio.Event,
     ) -> None:
+        """Run the assistant pipeline until ``shutdown`` is requested."""
         await self._preload_wakeword_reply()
 
         async with asyncio.TaskGroup() as group:
@@ -87,6 +89,7 @@ class Orchestrator:
             return
 
         self._logger.debug("Preloading wakeword reply")
+        self._wakeword_reply_frames.clear()
 
         async for frame in self._speech.synthesize(self._wakeword_reply_text):
             self._wakeword_reply_frames.append(frame)
@@ -160,7 +163,7 @@ class Orchestrator:
                 case ListeningMode.WAKEWORD:
                     if chunk.wakeword_detected:
                         self._set_listening_mode(ListeningMode.PAUSED)
-                        self._replaying.put_nowait(self._WAKEWORD_REPLY_TRIGGER)
+                        self._replaying.put_nowait(_ReplaySignal.WAKEWORD_REPLY)
                 case ListeningMode.UTTERANCE:
                     segment_ended, segment = self._speech.detect(chunk)
                     if segment_ended and segment is not None:
@@ -261,10 +264,26 @@ class Orchestrator:
             line = await self._replaying.get()
             try:
                 match line:
-                    case self._WAKEWORD_REPLY_TRIGGER:
+                    case _ReplaySignal.WAKEWORD_REPLY:
                         await asyncio.sleep(self._WAKEWORD_REPLY_START_DELAY_SECONDS)
-                        for frame in self._wakeword_reply_frames:
-                            await self._audio.write(frame)
+                        if self._wakeword_reply_frames:
+                            self._events.publish(
+                                PipelineStageChanged(
+                                    PipelineStage.PLAYBACK,
+                                    PipelineStageStatus.STARTED,
+                                )
+                            )
+                            for frame in self._wakeword_reply_frames:
+                                await self._audio.write(frame)
+                                self._events.publish(
+                                    AudioPlayed(samples_count=len(frame.samples))
+                                )
+                            self._events.publish(
+                                PipelineStageChanged(
+                                    PipelineStage.PLAYBACK,
+                                    PipelineStageStatus.COMPLETED,
+                                )
+                            )
                         await asyncio.sleep(self._WAKEWORD_REPLY_END_DELAY_SECONDS)
                         self._set_listening_mode(ListeningMode.UTTERANCE)
 

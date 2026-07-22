@@ -8,7 +8,7 @@ from openwakeword.model import Model
 
 from henry_resources import ensure_model_path
 
-from ..domain import AudioChunk
+from ..domain import AudioFrame
 from ..ports import WakeWordModel
 
 
@@ -40,7 +40,7 @@ class OpenWakeWordModel(WakeWordModel):
     ) -> None:
         self._close()
 
-    def predict(self, frame: AudioChunk) -> float:
+    def predict(self, frame: AudioFrame) -> float:
         model = self._require_model()
 
         incoming_samples: NDArray[np.float32] = np.asarray(
@@ -131,7 +131,7 @@ class OpenWakeWordModel(WakeWordModel):
             return
 
         self._model = None
-        self._state = None
+        self._samples_buffer = np.empty(0, dtype=np.float32)
         self._logger.debug("Model CLOSED")
 
     def _require_model(self) -> Model:

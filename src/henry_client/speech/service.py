@@ -71,9 +71,11 @@ class SpeechService(AbstractAsyncContextManager):
         await self._stop()
 
     def detect(self, chunk: AudioChunk) -> tuple[bool, AudioFrame | None]:
+        """Feed a VAD-enriched chunk into the utterance segmenter."""
         return self._segmenter.feed(chunk)
 
     async def transcribe(self, frame: AudioFrame) -> str | None:
+        """Transcribe one complete utterance in the STT worker."""
         request = DoTranscribe(
             frame=frame,
             response=asyncio.Future(),
@@ -82,6 +84,7 @@ class SpeechService(AbstractAsyncContextManager):
         return await request.response
 
     async def synthesize(self, text: str) -> AsyncIterator[AudioFrame]:
+        """Stream synthesized frames produced by the TTS worker."""
         request = DoSynthesize(
             text=text,
             response=asyncio.Queue(),
@@ -98,7 +101,7 @@ class SpeechService(AbstractAsyncContextManager):
             request.response.task_done()
 
     async def _start(self) -> None:
-        if self._stt_thread is not None or self._stt_thread is not None:
+        if self._stt_thread is not None or self._tts_thread is not None:
             raise SpeechServiceError("Workers already started")
 
         loop = asyncio.get_running_loop()

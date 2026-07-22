@@ -18,6 +18,7 @@ def locate_local(start: Path) -> Path | None:
 
 
 def locate_root() -> Path:
+    """Resolve Henry data from HENRY_HOME, a local .henry, or user data."""
     if value := os.getenv(HOME_ENV_VAR):
         return Path(value).expanduser()
 

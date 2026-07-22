@@ -3,19 +3,11 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from .audio.adapters import (
-    OpenWakeWordModel,
-    PyAudioSession,
-    PyAudioStream,
-    SileroVADModel,
-)
 from .audio.service import AudioService
-from .conversation.adapters import MLXLanguageModel
 from .conversation.service import ConversationService
 from .events import AppEventSink
 from .orchestrator import Orchestrator
 from .profiles import Profile
-from .speech.adapters import ParakeetSTTModel, PiperTTSModel
 from .speech.service import SpeechService
 
 
@@ -35,6 +27,17 @@ class App:
         self,
         shutdown: asyncio.Event,
     ) -> None:
+        """Run the configured assistant until ``shutdown`` is requested."""
+        # Heavy native adapters stay out of module import paths used by tests and tools.
+        from .audio.adapters import (
+            OpenWakeWordModel,
+            PyAudioSession,
+            PyAudioStream,
+            SileroVADModel,
+        )
+        from .conversation.adapters import MLXLanguageModel
+        from .speech.adapters import ParakeetSTTModel, PiperTTSModel
+
         self._logger.debug("Starting")
 
         with PyAudioSession() as audio_session:
