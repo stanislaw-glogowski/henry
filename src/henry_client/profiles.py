@@ -11,6 +11,7 @@ class ProfileKind(IntEnum):
 class Profile:
     name: str
     voice_model: str
+    wakeword_model: str | None = None
     system_prompt: str | None = None
 
     @staticmethod
@@ -19,6 +20,7 @@ class Profile:
         voice_model: str,
         system_language: str,
         kind: ProfileKind = ProfileKind.DEFAULT,
+        wakeword_model: str | None = None,
         system_prompt: str | None = None,
     ):
         if system_prompt is None:
@@ -31,6 +33,7 @@ class Profile:
         return Profile(
             name=name,
             voice_model=voice_model,
+            wakeword_model=wakeword_model,
             system_prompt=system_prompt,
         )
 

@@ -17,7 +17,7 @@ from henry_common.concurrency import (
 
 from ..audio import AudioChunk, AudioFrame
 from .domain import SpeechSegmenter
-from .ports import STTModel, TTSModel
+from .ports import STTModel, TTSModel, WakeWordModel
 
 STT_THREAD_NAME = "SpeechService.stt_worker"
 TTS_THREAD_NAME = "SpeechService.tts_worker"
@@ -47,6 +47,7 @@ class SpeechService(AbstractAsyncContextManager):
         self,
         stt_model: STTModel,
         tts_model: TTSModel,
+        wakeword_model: WakeWordModel,
     ) -> None:
         self._segmenter = SpeechSegmenter()
         self._stt_model = stt_model
@@ -56,6 +57,8 @@ class SpeechService(AbstractAsyncContextManager):
         self._tts_model = tts_model
         self._tts_thread: threading.Thread | None = None
         self._tts_requests: queue.Queue[TTSRequest] = queue.Queue()
+
+        self._wakeword_model = wakeword_model
 
         self._logger = logger.bind(component="SpeechService")
 

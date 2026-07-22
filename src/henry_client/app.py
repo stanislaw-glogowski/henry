@@ -14,7 +14,7 @@ from .conversation.service import ConversationService
 from .events import AppEventSink
 from .orchestrator import Orchestrator
 from .profiles import Profile
-from .speech.adapters import ParakeetSTTModel, PiperTTSModel
+from .speech.adapters import OpenWakeWordModel, ParakeetSTTModel, PiperTTSModel
 from .speech.service import SpeechService
 
 
@@ -35,13 +35,14 @@ class App:
         shutdown: asyncio.Event,
     ) -> None:
         self._logger.debug("Starting")
-
-        with PyAudioSession() as audio_session:
+        wakeword_model = OpenWakeWordModel()
+        with PyAudioSession() as audio_session, wakeword_model:
             audio_input = PyAudioStream.input(audio_session)
             audio_output = PyAudioStream.output(audio_session)
             vad_model = SileroVADModel()
             stt_model = ParakeetSTTModel()
             tts_model = PiperTTSModel(self._config.profile.voice_model)
+
             language_model = MLXLanguageModel(self._config.language_model)
 
             async with (
@@ -53,6 +54,7 @@ class App:
                 SpeechService(
                     stt_model=stt_model,
                     tts_model=tts_model,
+                    wakeword_model=wakeword_model,
                 ) as speech_service,
                 ConversationService(
                     system_prompt=self._config.profile.system_prompt,

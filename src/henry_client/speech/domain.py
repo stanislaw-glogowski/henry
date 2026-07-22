@@ -2,28 +2,18 @@ from collections import deque
 
 from ..audio import AudioBuffer, AudioChunk, AudioFrame
 
-MIN_START_SPEECH_FRAMES = 10
-MAX_START_SILENCE_FRAMES = 150
-MAX_END_SILENCE_FRAMES = 50
-PRE_ROLL_FRAMES = 15
-
 
 class SpeechSegmenter:
-    def __init__(
-        self,
-        min_start_speech_frames: int = MIN_START_SPEECH_FRAMES,
-        max_start_silence_frames: int = MAX_START_SILENCE_FRAMES,
-        max_end_silence_frames: int = MAX_END_SILENCE_FRAMES,
-        pre_roll_frames: int = PRE_ROLL_FRAMES,
-    ) -> None:
+    _MIN_START_SPEECH_FRAMES = 10
+    _MAX_START_SILENCE_FRAMES = 150
+    _MAX_END_SILENCE_FRAMES = 50
+    _PRE_ROLL_FRAMES = 15
 
-        self._min_start_speech_frames = min_start_speech_frames
-        self._max_start_silence_frames = max_start_silence_frames
-        self._max_end_silence_frames = max_end_silence_frames
+    def __init__(self) -> None:
 
         self._chunks = AudioBuffer()
         self._pending_chunks: deque[AudioChunk] = deque(
-            maxlen=pre_roll_frames + min_start_speech_frames
+            maxlen=self._PRE_ROLL_FRAMES + self._MIN_START_SPEECH_FRAMES
         )
         self._speech_started = False
         self._start_speech_frames = 0
@@ -39,7 +29,7 @@ class SpeechSegmenter:
 
             if chunk.is_speech:
                 self._start_speech_frames += 1
-                if self._start_speech_frames >= self._min_start_speech_frames:
+                if self._start_speech_frames >= self._MIN_START_SPEECH_FRAMES:
                     self._speech_started = True
                     self._start_silence_frames = 0
                     for pending_frame in self._pending_chunks:
@@ -48,7 +38,7 @@ class SpeechSegmenter:
             else:
                 self._start_speech_frames = 0
                 self._start_silence_frames += 1
-                if self._start_silence_frames > self._max_start_silence_frames:
+                if self._start_silence_frames > self._MAX_START_SILENCE_FRAMES:
                     self._start_silence_frames = 0
                     self._reset()
                     return True, None
@@ -61,7 +51,7 @@ class SpeechSegmenter:
             self._end_silence_frames = 0
         else:
             self._end_silence_frames += 1
-            if self._end_silence_frames > self._max_end_silence_frames:
+            if self._end_silence_frames > self._MAX_END_SILENCE_FRAMES:
                 return True, self._build()
 
         return False, None
