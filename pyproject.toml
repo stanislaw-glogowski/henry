@@ -11,7 +11,9 @@ dependencies = [
     "mlx-audio>=0.4.5",
     "mlx-lm>=0.31.3",
     "mlx>=0.32.0",
-    "numpy>=2.4.6",
+    "numpy>=2.5.1",
+    "onnxruntime>=1.24.1,<2",
+    "openwakeword==0.6.0",
     "piper-tts>=1.5.0",
     "piper>=0.15.1",
     "pyaudio>=0.2.14",
@@ -21,7 +23,7 @@ dependencies = [
 
 [project.scripts]
 henry-cli = "henry_cli.main:main"
-henry-plain = "henry_plain.main:main"
+henry-debugger = "henry_debugger.main:main"
 
 [dependency-groups]
 dev = [
@@ -31,11 +33,22 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling", "pyaudio"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+exclude-dependencies = [
+    { package = { name = "openwakeword", version = "0.6.0" }, dependencies = ["tflite-runtime"] },
+]
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/henry", "src/henry_cli", "src/henry_core", "src/henry_raw"]
+packages = [
+    "src/henry_cli",
+    "src/henry_client",
+    "src/henry_common",
+    "src/henry_debugger",
+    "src/henry_resources",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

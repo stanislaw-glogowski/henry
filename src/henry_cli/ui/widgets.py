@@ -9,9 +9,9 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Label, LoadingIndicator, Static
 
-from henry.events import PipelineStage, PipelineStageStatus
+from henry_client.events import PipelineStage, PipelineStageStatus
 
-from ..telemetry import TelemetrySnapshot
+from ..events import TelemetrySnapshot
 from .state import PipelineState
 
 TABLE_LABEL_WIDTH = 22
@@ -22,7 +22,7 @@ VAD_DETECTED_STYLE = "green"
 
 PIPELINE_STATUS_SEGMENT_WIDTH = 9
 PIPELINE_STATUS_STYLES = {
-    PipelineStageStatus.NONE: "white",
+    PipelineStageStatus.UNKNOWN: "white",
     PipelineStageStatus.READY: "blue",
     PipelineStageStatus.STARTED: "green",
     PipelineStageStatus.COMPLETED: "cyan",
@@ -84,7 +84,7 @@ class PipelinePanel(Static):
 
         match status:
             case (
-                PipelineStageStatus.NONE
+                PipelineStageStatus.UNKNOWN
                 | PipelineStageStatus.READY
                 | PipelineStageStatus.COMPLETED
             ):

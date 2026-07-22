@@ -6,7 +6,6 @@ from textual.widgets import Footer, RichLog
 
 from ..events import EventBridge
 from ..logs import LogBuffer
-from ..telemetry import TelemetryCollector
 from .state import State
 from .widgets import PipelinePanel, StatusModal, TelemetryPanel
 
@@ -50,12 +49,10 @@ class Layout(App[None]):
         self,
         logs: LogBuffer,
         events: EventBridge,
-        telemetry: TelemetryCollector,
     ) -> None:
         super().__init__()
         self._logs = logs
         self._events = events
-        self._telemetry = telemetry
 
     def compose(self) -> ComposeResult:
         yield PipelinePanel(id="pipeline")
@@ -100,8 +97,7 @@ class Layout(App[None]):
             widget.write(line)
 
     def refresh_telemetry(self) -> None:
-        snapshot = self._telemetry.snapshot()
-        self.state = self.state.replace_telemetry(snapshot)
+        self.state = self.state.replace_telemetry(self._events.telemetry_snapshot)
 
     def on_mount(self) -> None:
         self.consume_events()
