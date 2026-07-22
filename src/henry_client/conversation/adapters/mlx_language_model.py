@@ -11,7 +11,7 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper as Tokenizer
 from ..domain import Message, MessageChunk
 from ..ports import LanguageModel
 
-MAX_TOKENS = 256
+MAX_TOKENS = 512
 
 
 class MLXLanguageModelError(RuntimeError): ...
