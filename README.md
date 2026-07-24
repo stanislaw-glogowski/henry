@@ -40,7 +40,8 @@ Microphone (16 kHz)
 Henry begins in wake-word mode. After activation it plays a preloaded spoken
 acknowledgement and enters utterance mode. The current implementation keeps the
 conversation session active for follow-ups and returns to wake-word mode after a
-configurable number of consecutive empty utterance timeouts.
+configurable number of consecutive empty utterance timeouts. A completed
+utterance resets that counter.
 
 ## 📦 Requirements
 
@@ -151,9 +152,10 @@ Run without the terminal UI and log application events to the console:
 uv run henry-cli -noui
 ```
 
-The conventional long form `--no-ui` is also supported. Both modes handle
-`SIGINT` and `SIGTERM`. Press `q` in the terminal UI or use `Ctrl+C` to request
-shutdown.
+`henry-cli` is the only application entrypoint; the former standalone debugger
+has been folded into this mode. The conventional long form `--no-ui` is also
+supported. Both modes handle `SIGINT` and `SIGTERM`. Press `q` in the terminal UI
+or use `Ctrl+C` to request shutdown.
 
 Profiles configure the assistant name, system prompt style, wake-word model,
 spoken activation reply, and Piper voice. Command-line arguments take precedence
@@ -171,6 +173,9 @@ over environment variables, which take precedence over the application defaults.
 | `--voice-model`        | `HENRY_VOICE_MODEL`         | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` |
 | `--language-model`     | `HENRY_LANGUAGE_MODEL`      | `mlx-community/Qwen3.5-9B-OptiQ-4bit`     |
 | `--max-empty-segments` | `HENRY_MAX_EMPTY_SEGMENTS`  | `3`                                       |
+
+`--max-empty-segments` must be a positive integer. It counts consecutive
+utterance windows that end without speech; a real utterance resets the count.
 
 For example:
 
@@ -216,9 +221,11 @@ The tests progress from pure domain behavior to service lifecycle and complete
 orchestration. Fake ports exercise real queues, threads, and asyncio tasks without
 opening hardware or loading production models.
 
-`pytest` enforces at least 95% branch coverage across the CLI, client, and
-resource packages. Concrete adapter modules are excluded from that threshold and
-remain subject to focused contract tests and manual Apple Silicon hardware checks.
+`pytest` enforces at least 95% combined coverage with branch measurement across
+the CLI, client, and resource packages. Concrete adapter modules are excluded
+from that threshold and remain subject to focused contract tests and manual Apple
+Silicon hardware checks. The suite includes headless Textual tests and fake-driven
+service tests using real asyncio queues, tasks, and worker threads.
 
 For environments where the default uv cache is read-only, prefix commands with:
 
@@ -231,7 +238,8 @@ UV_CACHE_DIR=/private/tmp/uv-cache
 - macOS and Apple Silicon are the only supported runtime target.
 - Input and output use the current default PortAudio devices.
 - The application has no acoustic echo cancellation or barge-in support.
-- A conversation session currently has no inactivity timeout.
+- Session expiry is based on consecutive empty utterance windows, not wall-clock
+  inactivity.
 - Utterance segmentation currently relies on trailing silence and has no hard
   maximum recording duration.
 
