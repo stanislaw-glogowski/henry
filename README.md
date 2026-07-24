@@ -7,8 +7,8 @@
 **A local, privacy-first voice assistant built for Apple Silicon Macs.**
 
 Henry keeps wake-word detection, speech recognition, language generation, and
-speech synthesis on the machine while exposing the live pipeline through a
-Textual terminal UI.
+speech synthesis on the machine while exposing the live pipeline through either
+a Textual terminal UI or console event logging.
 
 The project is intentionally small and explicit: asyncio coordinates the
 application, dedicated worker threads own blocking audio and ML runtimes, and
@@ -21,7 +21,7 @@ ports keep domain services independent from concrete adapters.
 - Multilingual Parakeet speech recognition, including Polish.
 - MLX language-model inference optimized for Apple Silicon.
 - Line-buffered Piper speech synthesis.
-- Textual terminal UI plus a lightweight event-logging debugger.
+- Textual terminal UI with an optional lightweight event-logging mode.
 - Explicit asyncio, worker-thread, port, and adapter boundaries.
 
 ## 🎙️ Voice pipeline
@@ -70,17 +70,16 @@ models in the same Hugging Face cache that Henry's adapters use at runtime.
 | Pipeline stage | Model or repository                                                                                    | Purpose and recommendation                                                         |
 |----------------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
 | Wake word      | Custom `.onnx` from [openwakeword.com](https://openwakeword.com/)                                      | Recommended source for a custom activation phrase                                  |
-| Wake word      | [`alexa_v0.1.onnx`](https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_v0.1.onnx) | Official pre-trained openWakeWord model for "Alexa"; useful for the debugger       |
+| Wake word      | [`alexa_v0.1.onnx`](https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_v0.1.onnx) | Official pre-trained openWakeWord model for "Alexa"; useful for testing            |
 | VAD            | [`mlx-community/silero-vad`](https://huggingface.co/mlx-community/silero-vad)                          | Fixed model used for voice activity detection                                      |
 | STT            | [`mlx-community/parakeet-tdt-0.6b-v3`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)      | Fixed multilingual speech-to-text model, including Polish                          |
-| Language model | [`mlx-community/Qwen3.5-4B-MLX-4bit`](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)        | Smaller and lower-quality model; suitable for debugging                            |
+| Language model | [`mlx-community/Qwen3.5-4B-MLX-4bit`](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)        | Smaller and lower-quality model; suitable for diagnostics                          |
 | Language model | [`mlx-community/Qwen3.5-9B-OptiQ-4bit`](https://huggingface.co/mlx-community/Qwen3.5-9B-OptiQ-4bit)    | Recommended default with sufficient response quality                               |
 | Voice          | [`rhasspy/piper-voices`](https://huggingface.co/rhasspy/piper-voices/tree/main)                        | Repository containing Piper voices; Henry supports repository-relative model paths |
 
 ### 🤗 Downloading Hugging Face models
 
-Download the VAD, STT, and the language model required by the application you
-want to run:
+Download the VAD, STT, and the language model you want to run:
 
 ```bash
 uv run hf download mlx-community/silero-vad
@@ -146,46 +145,47 @@ Start the terminal UI:
 uv run henry-cli
 ```
 
-Start the event-logging debugger:
+Run without the terminal UI and log application events to the console:
 
 ```bash
-uv run henry-debugger
+uv run henry-cli -noui
 ```
 
-Both applications handle `SIGINT` and `SIGTERM`. Press `q` in the terminal UI or
-use `Ctrl+C` to request shutdown.
+The conventional long form `--no-ui` is also supported. Both modes handle
+`SIGINT` and `SIGTERM`. Press `q` in the terminal UI or use `Ctrl+C` to request
+shutdown.
 
 Profiles configure the assistant name, system prompt style, wake-word model,
 spoken activation reply, and Piper voice. Command-line arguments take precedence
 over environment variables, which take precedence over the application defaults.
 
-| Command-line argument | Environment variable    | CLI default                               | Debugger default                                |
-|-----------------------|-------------------------|-------------------------------------------|-------------------------------------------------|
-| `--log-level`         | `HENRY_LOG_LEVEL`       | `DEBUG`                                   | `DEBUG`                                         |
-| `--profile-kind`      | `HENRY_PROFILE_KIND`    | `default`                                 | `sarcastic`                                     |
-| `--profile-name`      | `HENRY_PROFILE_NAME`    | `Henry`                                   | `Alexa`                                         |
-| `--system-language`   | `HENRY_SYSTEM_LANGUAGE` | `Polish`                                  | `Polish`                                        |
-| `--wakeword-reply`    | `HENRY_WAKEWORD_REPLY`  | `Tak, Wielmożny Panie...`                 | `Tak Słucham...`                                |
-| `--wakeword-model`    | `HENRY_WAKEWORD_MODEL`  | `Hey_Henree_20260406_162745.onnx`         | `alexa_v0.1.onnx`                               |
-| `--voice-model`       | `HENRY_VOICE_MODEL`     | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` |
-| `--language-model`    | `HENRY_LANGUAGE_MODEL`  | `mlx-community/Qwen3.5-9B-OptiQ-4bit`     | `mlx-community/Qwen3.5-4B-MLX-4bit`             |
+| Command-line argument | Environment variable    | Default                                   |
+|-----------------------|-------------------------|-------------------------------------------|
+| `-noui` / `--no-ui`   | —                       | disabled                                  |
+| `--log-level`         | `HENRY_LOG_LEVEL`       | `DEBUG`                                   |
+| `--profile-kind`      | `HENRY_PROFILE_KIND`    | `default`                                 |
+| `--profile-name`      | `HENRY_PROFILE_NAME`    | `Henry`                                   |
+| `--system-language`   | `HENRY_SYSTEM_LANGUAGE` | `Polish`                                  |
+| `--wakeword-reply`    | `HENRY_WAKEWORD_REPLY`  | `Tak, Wielmożny Panie...`                 |
+| `--wakeword-model`    | `HENRY_WAKEWORD_MODEL`  | `Hey_Henree_20260406_162745.onnx`         |
+| `--voice-model`       | `HENRY_VOICE_MODEL`     | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` |
+| `--language-model`    | `HENRY_LANGUAGE_MODEL`  | `mlx-community/Qwen3.5-9B-OptiQ-4bit`     |
 
 For example:
 
 ```bash
 HENRY_PROFILE_NAME=Ada uv run henry-cli --language-model local/model
-uv run henry-debugger --log-level TRACE --wakeword-model alexa_v0.1.onnx
+uv run henry-cli -noui --log-level TRACE --wakeword-model alexa_v0.1.onnx
 ```
 
-Run either command with `--help` for the complete argument reference.
+Run `uv run henry-cli --help` for the complete argument reference.
 
 ## 🏗️ Architecture
 
 | Package           | Responsibility                                                     |
 |-------------------|--------------------------------------------------------------------|
 | `henry_client`    | Domain models, ports, adapters, services, and orchestration        |
-| `henry_cli`       | Textual UI, telemetry snapshots, pipeline state, and buffered logs |
-| `henry_debugger`  | Lightweight event and lifecycle diagnostics                        |
+| `henry_cli`       | Textual UI, console diagnostics, telemetry state, and buffered logs |
 | `henry_resources` | Resolution of local data and model paths                           |
 
 The event loop runs capture, transcription, processing, and replay tasks. Blocking

@@ -22,7 +22,6 @@ dependencies = [
 
 [project.scripts]
 henry-cli = "henry_cli.main:main"
-henry-debugger = "henry_debugger.main:main"
 
 [dependency-groups]
 dev = [
@@ -44,7 +43,6 @@ exclude-dependencies = [
 packages = [
     "src/henry_cli",
     "src/henry_client",
-    "src/henry_debugger",
     "src/henry_resources",
 ]
 
