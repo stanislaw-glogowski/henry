@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from henry_client.speech.service import SpeechService
+from henry_client.speech.service import SpeechService, SpeechServiceError
 from tests.support import FakeSTTModel, FakeTTSModel, frame
 
 
@@ -122,5 +122,31 @@ def test_speech_service_cleans_up_stt_when_tts_startup_fails() -> None:
                 pass
 
         assert not stt.opened
+
+    asyncio.run(scenario())
+
+
+def test_speech_service_requires_open_executors_and_delegates_segmentation() -> None:
+    async def scenario() -> None:
+        service = SpeechService(stt_model=FakeSTTModel(), tts_model=FakeTTSModel())
+
+        assert service.segment(frame(), False) == (False, None)
+        with pytest.raises(SpeechServiceError, match="STT executor is not open"):
+            await service.transcribe(frame())
+        with pytest.raises(SpeechServiceError, match="TTS executor is not open"):
+            _ = [value async for value in service.synthesize("reply")]
+
+        await service._stop()
+
+    asyncio.run(scenario())
+
+
+def test_speech_service_rejects_duplicate_start() -> None:
+    async def scenario() -> None:
+        service = SpeechService(stt_model=FakeSTTModel(), tts_model=FakeTTSModel())
+
+        async with service:
+            with pytest.raises(SpeechServiceError, match="already started"):
+                await service._start()
 
     asyncio.run(scenario())

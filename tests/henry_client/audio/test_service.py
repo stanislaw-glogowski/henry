@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from henry_client.audio.service import AudioService
+from henry_client.audio.service import AudioService, AudioServiceError
 from tests.support import (
     FakeInputStream,
     FakeOutputStream,
@@ -174,5 +174,70 @@ def test_audio_service_cleans_up_capture_when_playback_startup_fails() -> None:
         assert not input_stream.opened
         assert not vad_model.opened
         assert not wakeword_model.opened
+
+    asyncio.run(scenario())
+
+
+def test_audio_service_requires_open_executors() -> None:
+    async def scenario() -> None:
+        service = AudioService(
+            input_stream=FakeInputStream(),
+            output_stream=FakeOutputStream(),
+            vad_model=FakeVADModel(),
+            wakeword_model=FakeWakeWordModel(),
+        )
+
+        service.enable_wakeword()
+        with pytest.raises(AudioServiceError, match="Capture executor is not open"):
+            await anext(service.capture())
+        with pytest.raises(AudioServiceError, match="Playback executor is not open"):
+            await service.playback(frame(sample_rate=22_050))
+
+        await service._stop()
+
+    asyncio.run(scenario())
+
+
+def test_audio_service_rejects_duplicate_start_and_capture() -> None:
+    async def scenario() -> None:
+        service = AudioService(
+            input_stream=FakeInputStream(),
+            output_stream=FakeOutputStream(),
+            vad_model=FakeVADModel(),
+            wakeword_model=FakeWakeWordModel(),
+        )
+
+        async with service:
+            with pytest.raises(AudioServiceError, match="already started"):
+                await service._start()
+
+            chunks = service.capture()
+            await asyncio.wait_for(anext(chunks), timeout=1)
+            with pytest.raises(AudioServiceError, match="already running"):
+                await anext(service.capture())
+            await chunks.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_audio_service_closes_input_when_vad_startup_fails() -> None:
+    class FailingVADModel(FakeVADModel):
+        def open(self) -> None:
+            raise RuntimeError("vad startup failed")
+
+    async def scenario() -> None:
+        input_stream = FakeInputStream()
+        service = AudioService(
+            input_stream=input_stream,
+            output_stream=FakeOutputStream(),
+            vad_model=FailingVADModel(),
+            wakeword_model=FakeWakeWordModel(),
+        )
+
+        with pytest.raises(RuntimeError, match="vad startup failed"):
+            async with service:
+                pass
+
+        assert not input_stream.opened
 
     asyncio.run(scenario())

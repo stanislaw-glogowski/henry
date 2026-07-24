@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from henry_resources import locator
 from henry_resources.locator import locate_root
 from henry_resources.models import ensure_model_path
 
@@ -29,3 +32,25 @@ def test_ensure_model_path_requires_existing_file(monkeypatch, tmp_path: Path) -
     monkeypatch.setenv("HENRY_HOME", str(tmp_path))
 
     assert ensure_model_path("wake", "model.onnx") == model
+
+
+def test_locate_root_falls_back_to_platform_data_directory(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fallback = tmp_path / "application-support"
+    monkeypatch.delenv("HENRY_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(locator, "user_data_dir", lambda _: str(fallback))
+
+    assert locate_root() == fallback
+
+
+def test_ensure_model_path_rejects_missing_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HENRY_HOME", str(tmp_path))
+
+    with pytest.raises(FileNotFoundError, match="missing.onnx"):
+        ensure_model_path("wake", "missing.onnx")

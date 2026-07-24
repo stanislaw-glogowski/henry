@@ -1,14 +1,17 @@
+import pytest
+
 from henry_client.profiles import Profile, ProfileKind
 
 
-def test_profile_builds_prompt_for_selected_kind() -> None:
+@pytest.mark.parametrize("kind", list(ProfileKind))
+def test_profile_builds_prompt_for_selected_kind(kind: ProfileKind) -> None:
     profile = Profile.build(
         name="Henry",
         voice_model="voice.onnx",
         wakeword_model="wake.onnx",
         wakeword_reply="Ready.",
         system_language="Polish",
-        kind=ProfileKind.SARCASTIC,
+        kind=kind,
     )
 
     assert profile.system_prompt is not None

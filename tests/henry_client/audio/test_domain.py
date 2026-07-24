@@ -50,3 +50,22 @@ def test_audio_buffer_clear_resets_samples_and_format() -> None:
     result = buffer.build()
     assert result is not None
     assert result.format.sample_rate == 22_050
+
+
+def test_audio_format_builds_frame_from_bytes_and_frame_converts_back() -> None:
+    samples = np.array([0.25, 0.5], dtype=np.float32)
+    audio_format = AudioFormat(sample_rate=16_000)
+
+    result = audio_format.build_frame(samples.tobytes())
+
+    np.testing.assert_array_equal(result.samples, samples)
+    assert result.to_bytes() == samples.tobytes()
+
+
+def test_audio_buffer_reports_frame_count() -> None:
+    buffer = AudioBuffer()
+    assert len(buffer) == 0
+
+    buffer.append(frame())
+
+    assert len(buffer) == 1

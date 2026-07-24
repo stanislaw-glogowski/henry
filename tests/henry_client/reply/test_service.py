@@ -11,7 +11,7 @@ from henry_client.reply import (
     ReplySignal,
     ReplyText,
 )
-from henry_client.reply.service import ReplyService
+from henry_client.reply.service import ReplyService, ReplyServiceError
 
 
 class FakeResponder(AbstractResource):
@@ -84,3 +84,53 @@ def test_reply_service_propagates_responder_startup_failure() -> None:
                 pass
 
     asyncio.run(scenario())
+
+
+def test_reply_service_requires_open_executor_and_ignores_concurrent_reply() -> None:
+    async def scenario() -> None:
+        service = ReplyService(FakeResponder())
+
+        with pytest.raises(ReplyServiceError, match="not open"):
+            _ = [reply async for reply in service.reply("question")]
+
+        async with service:
+            service._replying.set()
+            assert [reply async for reply in service.reply("question")] == []
+            service._replying.clear()
+
+            with pytest.raises(ReplyServiceError, match="already started"):
+                await service._start()
+
+        await service._stop()
+
+    asyncio.run(scenario())
+
+
+def test_reply_service_propagates_runtime_failure() -> None:
+    class FailingResponder(FakeResponder):
+        def respond(self, request: ReplyRequest) -> Iterator[ReplyChunk]:
+            raise RuntimeError("response failed")
+            yield
+
+    async def scenario() -> None:
+        service = ReplyService(FailingResponder())
+
+        async with service:
+            with pytest.raises(RuntimeError, match="response failed"):
+                _ = [reply async for reply in service.reply("question")]
+
+    asyncio.run(scenario())
+
+
+def test_reply_service_skips_empty_lines() -> None:
+    async def scenario() -> None:
+        service = ReplyService(FakeResponder("\nanswer"))
+
+        async with service:
+            return [reply async for reply in service.reply("question")]
+
+    replies = asyncio.run(scenario())
+
+    assert [reply.content for reply in replies if isinstance(reply, ReplyLine)] == [
+        "answer"
+    ]

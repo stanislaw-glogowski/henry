@@ -216,6 +216,10 @@ The tests progress from pure domain behavior to service lifecycle and complete
 orchestration. Fake ports exercise real queues, threads, and asyncio tasks without
 opening hardware or loading production models.
 
+`pytest` enforces at least 95% branch coverage across the CLI, client, and
+resource packages. Concrete adapter modules are excluded from that threshold and
+remain subject to focused contract tests and manual Apple Silicon hardware checks.
+
 For environments where the default uv cache is read-only, prefix commands with:
 
 ```bash

@@ -27,6 +27,7 @@ henry-cli = "henry_cli.main:main"
 dev = [
     "black>=26.5.1",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
 ]
 
@@ -48,6 +49,23 @@ packages = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = [
+    "--cov=henry_cli",
+    "--cov=henry_client",
+    "--cov=henry_resources",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-fail-under=95",
+]
+
+[tool.coverage.run]
+omit = ["*/adapters/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "^\\s*\\.\\.\\.$",
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 88

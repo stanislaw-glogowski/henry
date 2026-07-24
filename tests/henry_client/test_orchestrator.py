@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from henry_client.events import AudioPlayed, PipelineStageChanged
 from henry_client.orchestrator import ListeningMode, Orchestrator
 from henry_client.pipeline import PipelineStage, PipelineStageStatus
@@ -43,6 +45,32 @@ class SequencedSpeechService(FakeSpeechService):
         result = next(self._segments)
         self.segmented.put_nowait(None)
         return True, result
+
+
+def test_orchestrator_validates_timing_and_empty_segment_limit() -> None:
+    dependencies = {
+        "audio": FakeAudioService(),
+        "speech": FakeSpeechService(),
+        "reply": FakeReplyService(),
+        "events": RecordingEventSink(),
+    }
+
+    with pytest.raises(ValueError, match="delay"):
+        Orchestrator(**dependencies, activation_end_delay=-0.1)
+    with pytest.raises(ValueError, match="empty segments"):
+        Orchestrator(**dependencies, max_empty_segments=0)
+
+
+def test_orchestrator_ignores_repeated_listening_mode() -> None:
+    orchestrator = Orchestrator(
+        audio=FakeAudioService(),
+        speech=FakeSpeechService(),
+        reply=FakeReplyService(),
+        events=RecordingEventSink(),
+    )
+
+    assert orchestrator._set_listening_mode(ListeningMode.PAUSED)
+    assert not orchestrator._set_listening_mode(ListeningMode.PAUSED)
 
 
 def test_orchestrator_plays_activation_reply_then_records() -> None:
