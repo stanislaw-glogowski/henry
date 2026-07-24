@@ -24,8 +24,7 @@ def test_audio_buffer_concatenates_frames_and_preserves_format() -> None:
     result = buffer.build()
 
     assert result is not None
-    assert result.sample_rate == 16_000
-    assert result.channels == 1
+    assert result.format == AudioFormat(sample_rate=16_000, channels=1)
     np.testing.assert_array_equal(result.samples, [1.0, 1.0, 2.0, 2.0, 2.0])
 
 
@@ -39,3 +38,15 @@ def test_audio_buffer_rejects_incompatible_frames() -> None:
 
 def test_empty_audio_buffer_builds_nothing() -> None:
     assert AudioBuffer().build() is None
+
+
+def test_audio_buffer_clear_resets_samples_and_format() -> None:
+    buffer = AudioBuffer()
+    buffer.append(frame(sample_rate=16_000))
+
+    buffer.clear()
+    buffer.append(frame(sample_rate=22_050))
+
+    result = buffer.build()
+    assert result is not None
+    assert result.format.sample_rate == 22_050

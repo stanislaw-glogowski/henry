@@ -1,6 +1,3 @@
-from types import TracebackType
-from typing import Self
-
 from huggingface_hub.utils import disable_progress_bars
 from loguru import logger
 from mlx_audio.vad import load
@@ -22,30 +19,19 @@ class SileroVADModel(VADModel):
         self._state: ModelState | None = None
         self._logger = logger.bind(component="SileroVADModel")
 
-    def __enter__(self) -> Self:
-        self._open()
-        return self
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self._close()
-
     def predict(self, frame: AudioFrame) -> float:
-        model = self._require_model()
+        if self._model is None:
+            raise SileroVADError("Model is not loaded")
 
-        probability, self._state = model.feed(
+        probability, self._state = self._model.feed(
             frame.samples,
             self._state,
-            sample_rate=frame.sample_rate,
+            sample_rate=frame.format.sample_rate,
         )
 
         return float(probability.item())
 
-    def _open(self) -> None:
+    def open(self) -> None:
         if self._model is not None:
             raise SileroVADError("Model is already loaded")
 
@@ -57,16 +43,10 @@ class SileroVADModel(VADModel):
 
         self._logger.debug("Model READY")
 
-    def _close(self) -> None:
+    def close(self) -> None:
         if self._model is None:
             return
 
         self._model = None
         self._state = None
         self._logger.debug("Model CLOSED")
-
-    def _require_model(self) -> Model:
-        if self._model is None:
-            raise SileroVADError("Model is not loaded")
-
-        return self._model

@@ -1,28 +1,33 @@
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
 
-from .domain import AudioFrame
+from ..components import AbstractResource
+from .domain import AudioFormat, AudioFrame
 
 
-class InputStream(AbstractContextManager, ABC):
+class StreamConfig(ABC):
+    format: AudioFormat
+    frames_per_buffer: int
+
+
+class InputStream(AbstractResource, ABC):
     @abstractmethod
     def read(self) -> AudioFrame:
         raise NotImplementedError
 
 
-class OutputStream(AbstractContextManager, ABC):
+class OutputStream(AbstractResource, ABC):
     @abstractmethod
     def write(self, frame: AudioFrame) -> None:
         raise NotImplementedError
 
 
-class VADModel(AbstractContextManager, ABC):
+class VADModel(AbstractResource, ABC):
     @abstractmethod
     def predict(self, frame: AudioFrame) -> float:
         raise NotImplementedError
 
 
-class WakeWordModel(AbstractContextManager, ABC):
+class WakeWordModel(AbstractResource, ABC):
     @abstractmethod
     def predict(self, frame: AudioFrame) -> float:
         raise NotImplementedError

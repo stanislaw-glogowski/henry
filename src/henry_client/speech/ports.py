@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from contextlib import AbstractContextManager
 
 from ..audio import AudioFrame
+from ..components import AbstractResource
 
 
-class TTSModel(AbstractContextManager, ABC):
+class TTSModel(AbstractResource, ABC):
     @abstractmethod
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
         raise NotImplementedError
 
 
-class STTModel(AbstractContextManager, ABC):
+class STTModel(AbstractResource, ABC):
     @abstractmethod
     def transcribe(self, frame: AudioFrame) -> str | None:
         raise NotImplementedError

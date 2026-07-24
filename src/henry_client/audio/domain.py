@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 
-type AudioSamples = NDArray[np.float32]
+type AudioSamples = np.ndarray
 
 
 class AudioFormatError(Exception): ...
@@ -12,7 +11,7 @@ class AudioFormatError(Exception): ...
 @dataclass(frozen=True, slots=True)
 class AudioFormat:
     sample_rate: int
-    channels: int
+    channels: int = 1
 
     def verify(self, other_format: AudioFormat) -> None:
         """Raise when channels or sample rate differ from this format."""
@@ -27,45 +26,46 @@ class AudioFormat:
                 f"got {other_format.sample_rate}"
             )
 
-    def build_frame(self, samples: AudioSamples) -> AudioFrame:
+    def build_frame(self, samples: AudioSamples | bytes) -> AudioFrame:
+        match samples:
+            case bytes():
+                samples = np.frombuffer(samples, dtype=np.float32)
+
         return AudioFrame(
-            channels=self.channels,
-            sample_rate=self.sample_rate,
+            format=self,
             samples=samples,
         )
 
 
 @dataclass(frozen=True, slots=True)
-class AudioFrame(AudioFormat):
-    samples: AudioSamples
-
-    def build_chunk(
-        self,
-        speech_detected: bool,
-        speech_score: float,
-        wakeword_detected: bool | None,
-        wakeword_score: float | None,
-    ) -> AudioChunk:
-        return AudioChunk(
-            channels=self.channels,
-            sample_rate=self.sample_rate,
-            samples=self.samples,
-            speech_detected=speech_detected,
-            speech_score=speech_score,
-            wakeword_detected=wakeword_detected,
-            wakeword_score=wakeword_score,
-        )
+class AudioConfig:
+    format: AudioFormat
+    frames_per_buffer: int = 512
 
 
 @dataclass(frozen=True, slots=True)
-class AudioChunk(AudioFrame):
-    speech_detected: bool
-    speech_score: float
-    wakeword_detected: bool | None
+class AudioFrame:
+    format: AudioFormat
+    samples: AudioSamples
+
+    def to_bytes(self) -> bytes:
+        return np.ascontiguousarray(
+            self.samples,
+            dtype=np.float32,
+        ).tobytes()
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChunk:
+    sequence_id: int
+    frame: AudioFrame
+    vad_score: float
     wakeword_score: float | None
 
 
 class AudioBuffer:
+    """Accumulate frames of one format until built or cleared."""
+
     def __init__(self) -> None:
         self._list: list[AudioSamples] = list()
         self._format: AudioFormat | None = None
@@ -75,12 +75,9 @@ class AudioBuffer:
 
     def append(self, frame: AudioFrame) -> None:
         if self._format is None:
-            self._format = AudioFormat(
-                sample_rate=frame.sample_rate,
-                channels=frame.channels,
-            )
+            self._format = frame.format
         else:
-            self._format.verify(frame)
+            self._format.verify(frame.format)
         self._list.append(frame.samples)
 
     def build(self) -> AudioFrame | None:
@@ -91,3 +88,4 @@ class AudioBuffer:
 
     def clear(self) -> None:
         self._list.clear()
+        self._format = None

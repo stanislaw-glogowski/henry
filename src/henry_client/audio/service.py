@@ -1,47 +1,22 @@
 import asyncio
-import queue
 import threading
 from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractAsyncContextManager, ExitStack
 from types import TracebackType
 from typing import Self
 
 from loguru import logger
 
-from henry_common.concurrency import (
-    join_started_thread,
-    set_future_exception_if_pending,
-    set_future_result_if_pending,
-)
-
 from .domain import AudioChunk, AudioFrame
 from .ports import InputStream, OutputStream, VADModel, WakeWordModel
-
-VAD_THRESHOLD = 0.5
-WAKEWORD_THRESHOLD = 0.75
-
-type InputRequest = DoRead | None
-type OutputRequest = DoWrite | None
-
-
-@dataclass(frozen=True, slots=True)
-class DoRead:
-    response: asyncio.Queue[AudioChunk | BaseException | None]
-
-
-@dataclass(frozen=True, slots=True)
-class DoWrite:
-    frame: AudioFrame
-    response: asyncio.Future[None]
 
 
 class AudioServiceError(RuntimeError): ...
 
 
 class AudioService(AbstractAsyncContextManager):
-    _INPUT_THREAD_NAME = "AudioService.input_worker"
-    _OUTPUT_THREAD_NAME = "AudioService.output_worker"
+    """Own audio input and output resources in dedicated worker threads."""
 
     def __init__(
         self,
@@ -49,26 +24,19 @@ class AudioService(AbstractAsyncContextManager):
         output_stream: OutputStream,
         vad_model: VADModel,
         wakeword_model: WakeWordModel,
-        vad_threshold=VAD_THRESHOLD,
-        wakeword_threshold=WAKEWORD_THRESHOLD,
     ) -> None:
-        self._input_stream = input_stream
+        self._capture_future: asyncio.Future[None] | None = None
+        self._capture_executor: ThreadPoolExecutor | None = None
+        self._capture_resources: ExitStack | None = None
+        self._playback_executor: ThreadPoolExecutor | None = None
+
         self._input_cancel = threading.Event()
-        self._input_thread: threading.Thread | None = None
-        self._input_requests: queue.Queue[InputRequest] = queue.Queue()
-
+        self._input_stream = input_stream
         self._output_stream = output_stream
-        self._output_thread: threading.Thread | None = None
-        self._output_requests: queue.Queue[OutputRequest] = queue.Queue()
-
         self._vad_model = vad_model
-        self._vad_threshold = vad_threshold
-
-        self._wakeword_disabled = threading.Event()
-        self._wakeword_reset_requested = threading.Event()
-        self._wakeword_control_lock = threading.Lock()
+        self._wakeword_enabled = threading.Event()
+        self._wakeword_reset = threading.Event()
         self._wakeword_model = wakeword_model
-        self._wakeword_threshold = wakeword_threshold
 
         self._logger = logger.bind(component="AudioService")
 
@@ -84,212 +52,226 @@ class AudioService(AbstractAsyncContextManager):
     ) -> None:
         await self._stop()
 
-    async def read(self) -> AsyncIterator[AudioChunk]:
-        """Stream microphone frames enriched with VAD and wake-word results."""
-        request = DoRead(
-            response=asyncio.Queue(),
-        )
-        self._input_requests.put_nowait(request)
-
-        while True:
-            frame = await request.response.get()
-            if frame is None:
-                return
-            if isinstance(frame, BaseException):
-                raise frame
-            yield frame
-            request.response.task_done()
-
-    async def write(self, frame: AudioFrame) -> None:
-        """Write one frame and wait until the output worker accepts it."""
-        request = DoWrite(
-            frame=frame,
-            response=asyncio.Future(),
-        )
-        self._output_requests.put_nowait(request)
-        await request.response
-
     def enable_wakeword(self) -> None:
-        """Re-arm wake-word detection; the input worker performs the model reset."""
-        with self._wakeword_control_lock:
-            self._wakeword_reset_requested.set()
-            self._wakeword_disabled.clear()
+        """Arm wake-word detection."""
+        self._wakeword_enabled.set()
+
+    def disable_wakeword(self) -> None:
+        """Disarm wake-word detection."""
+        self._wakeword_enabled.clear()
+
+    def reset_wakeword(self) -> None:
+        """Request a wake-word model reset in the capture worker."""
+        self._wakeword_reset.set()
+
+    async def capture(self) -> AsyncIterator[AudioChunk]:
+        """Stream microphone frames enriched with VAD and wake-word results."""
+        if self._capture_future is not None:
+            raise AudioServiceError("Capture is already running")
+
+        loop = asyncio.get_running_loop()
+        executor = self._require_capture_executor()
+        responses: asyncio.Queue[AudioChunk | BaseException | None] = asyncio.Queue()
+
+        self._capture_future = loop.run_in_executor(
+            executor,
+            self._run_capture_loop,
+            loop,
+            responses,
+        )
+
+        try:
+            while True:
+                response = await responses.get()
+                try:
+                    if response is None:
+                        break
+                    if isinstance(response, BaseException):
+                        raise response
+                    yield response
+                finally:
+                    responses.task_done()
+        finally:
+            self._input_cancel.set()
+            assert self._capture_future is not None
+            await self._capture_future
+
+    async def playback(self, frame: AudioFrame) -> None:
+        """Write one frame in the output stream's worker thread."""
+        loop = asyncio.get_running_loop()
+        executor = self._require_playback_executor()
+
+        await loop.run_in_executor(
+            executor,
+            self._output_stream.write,
+            frame,
+        )
+
+    def _run_capture_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        responses: asyncio.Queue[AudioChunk | BaseException | None],
+    ) -> None:
+        sequence_id = 0
+        try:
+            while not self._input_cancel.is_set():
+                sequence_id += 1
+
+                frame = self._input_stream.read()
+                vad_score = self._vad_model.predict(frame)
+                wakeword_score: float | None = None
+
+                if self._wakeword_reset.is_set():
+                    self._wakeword_model.reset()
+                    self._wakeword_reset.clear()
+
+                if self._wakeword_enabled.is_set():
+                    wakeword_score = self._wakeword_model.predict(frame)
+
+                loop.call_soon_threadsafe(
+                    responses.put_nowait,
+                    AudioChunk(
+                        sequence_id=sequence_id,
+                        frame=frame,
+                        vad_score=vad_score,
+                        wakeword_score=wakeword_score,
+                    ),
+                )
+            loop.call_soon_threadsafe(
+                responses.put_nowait,
+                None,
+            )
+        except BaseException as err:
+            loop.call_soon_threadsafe(
+                responses.put_nowait,
+                err,
+            )
+
+    def _require_capture_executor(self) -> ThreadPoolExecutor:
+        if self._capture_executor is None:
+            raise AudioServiceError("Capture executor is not open")
+
+        return self._capture_executor
+
+    def _require_playback_executor(self) -> ThreadPoolExecutor:
+        if self._playback_executor is None:
+            raise AudioServiceError("Playback executor is not open")
+
+        return self._playback_executor
 
     async def _start(self) -> None:
-        if self._input_thread is not None or self._output_thread is not None:
-            raise AudioServiceError("Workers already started")
+        if self._capture_executor is not None:
+            raise AudioServiceError("Capture executor is already started")
+
+        if self._playback_executor is not None:
+            raise AudioServiceError("Playback executor is already started")
 
         loop = asyncio.get_running_loop()
 
-        input_ready = loop.create_future()
-        self._input_cancel.clear()
-        self._input_requests = queue.Queue()
-
-        output_ready = loop.create_future()
-        self._output_requests = queue.Queue()
-
         try:
-            self._input_thread = threading.Thread(
-                target=self._input_worker,
-                args=(loop, input_ready),
-                name=self._INPUT_THREAD_NAME,
-            )
-            assert self._input_thread is not None
-            self._input_thread.start()
-            await input_ready
-            self._logger.debug("Input worker READY")
+            self._input_cancel.clear()
+            self._wakeword_enabled.set()
+            self._wakeword_reset.clear()
 
-            self._output_thread = threading.Thread(
-                target=self._output_worker,
-                args=(loop, output_ready),
-                name=self._OUTPUT_THREAD_NAME,
+            self._capture_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="AudioService.capture",
             )
-            assert self._output_thread is not None
-            self._output_thread.start()
-            await output_ready
-            self._logger.debug("Output worker READY")
+            await loop.run_in_executor(
+                self._capture_executor, self._open_capture_resources, None
+            )
+
+            self._playback_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="AudioService.playback",
+            )
+            await loop.run_in_executor(
+                self._playback_executor, self._open_playback_resources, None
+            )
+
         except BaseException:
             await self._stop()
             raise
 
+    def _open_capture_resources(self, _: object = None) -> None:
+        stack = ExitStack()
+
+        try:
+            self._input_stream.open()
+            stack.callback(self._input_stream.close)
+
+            self._vad_model.open()
+            stack.callback(self._vad_model.close)
+
+            self._wakeword_model.open()
+            stack.callback(self._wakeword_model.close)
+        except BaseException:
+            stack.close()
+            raise
+
+        self._capture_resources = stack
+
+    def _open_playback_resources(self, _: object = None) -> None:
+        self._output_stream.open()
+
     async def _stop(self) -> None:
-        if self._input_thread is not None:
-            self._input_cancel.set()
-            self._input_requests.put_nowait(None)
-            await join_started_thread(self._input_thread)
-            self._input_thread = None
-            self._logger.debug("Input worker STOPPED")
+        try:
+            await self._stop_capture()
+        finally:
+            await self._stop_playback()
 
-        if self._output_thread is not None:
-            self._output_requests.put_nowait(None)
-            await join_started_thread(self._output_thread)
-            self._output_thread = None
-            self._logger.debug("Output worker STOPPED")
+    async def _stop_capture(self):
+        executor = self._capture_executor
+        if executor is None:
+            return
 
-        self.enable_wakeword()
-
-    def _input_worker(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        ready: asyncio.Future[None],
-    ) -> None:
-        request: InputRequest = None
+        loop = asyncio.get_running_loop()
+        self._input_cancel.set()
 
         try:
-            with (
-                self._input_stream as stream,
-                self._wakeword_model as wakeword_model,
-                self._vad_model as vad_model,
-            ):
-                loop.call_soon_threadsafe(
-                    set_future_result_if_pending,
-                    ready,
+            if self._capture_future is not None:
+                await self._capture_future
+        finally:
+            try:
+                await loop.run_in_executor(
+                    executor,
+                    self._close_capture_resources,
                     None,
                 )
+            finally:
+                try:
+                    await asyncio.to_thread(executor.shutdown)
+                finally:
+                    self._capture_future = None
+                    self._capture_executor = None
+                    self._logger.debug("Capture executor STOPPED")
 
-                while True:
-                    request = self._input_requests.get()
+    async def _stop_playback(self) -> None:
+        executor = self._playback_executor
+        if executor is None:
+            return
 
-                    if request is None:
-                        self._input_requests.task_done()
-                        return
-
-                    try:
-                        while True:
-                            if self._input_cancel.is_set():
-                                loop.call_soon_threadsafe(
-                                    request.response.put_nowait,
-                                    None,
-                                )
-                                break
-
-                            frame = stream.read()
-                            speech_score = vad_model.predict(frame)
-                            speech_detected = speech_score >= self._vad_threshold
-
-                            wakeword_detected: bool | None = None
-                            wakeword_score: float | None = None
-
-                            with self._wakeword_control_lock:
-                                if self._wakeword_reset_requested.is_set():
-                                    wakeword_model.reset()
-                                    self._wakeword_reset_requested.clear()
-
-                            if not self._wakeword_disabled.is_set():
-                                score = wakeword_model.predict(frame)
-
-                                wakeword_score = score
-                                wakeword_detected = (
-                                    speech_detected
-                                    and score >= self._wakeword_threshold
-                                )
-                                if wakeword_detected:
-                                    self._wakeword_disabled.set()
-
-                            loop.call_soon_threadsafe(
-                                request.response.put_nowait,
-                                frame.build_chunk(
-                                    speech_detected=speech_detected,
-                                    speech_score=speech_score,
-                                    wakeword_detected=wakeword_detected,
-                                    wakeword_score=wakeword_score,
-                                ),
-                            )
-                    finally:
-                        self._input_requests.task_done()
-        except BaseException as err:
-            loop.call_soon_threadsafe(
-                set_future_exception_if_pending,
-                ready,
-                err,
-            )
-            if request is not None:
-                loop.call_soon_threadsafe(
-                    request.response.put_nowait,
-                    err,
-                )
-
-    def _output_worker(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        ready: asyncio.Future[None],
-    ) -> None:
-        request: OutputRequest = None
+        loop = asyncio.get_running_loop()
 
         try:
-            with self._output_stream as stream:
-                loop.call_soon_threadsafe(
-                    set_future_result_if_pending,
-                    ready,
-                    None,
-                )
-
-                while True:
-                    request = self._output_requests.get()
-
-                    if request is None:
-                        self._output_requests.task_done()
-                        break
-
-                    try:
-                        stream.write(request.frame)
-
-                        loop.call_soon_threadsafe(
-                            set_future_result_if_pending,
-                            request.response,
-                            None,
-                        )
-                    finally:
-                        self._output_requests.task_done()
-        except BaseException as err:
-            loop.call_soon_threadsafe(
-                set_future_exception_if_pending,
-                ready,
-                err,
+            await loop.run_in_executor(
+                executor,
+                self._close_playback_resources,
+                None,
             )
-            if request is not None:
-                loop.call_soon_threadsafe(
-                    set_future_exception_if_pending,
-                    request.response,
-                    err,
-                )
+        finally:
+            try:
+                await asyncio.to_thread(executor.shutdown)
+            finally:
+                self._playback_executor = None
+                self._logger.debug("Playback executor STOPPED")
+
+    def _close_capture_resources(self, _: object = None) -> None:
+        stack = self._capture_resources
+        self._capture_resources = None
+
+        if stack is not None:
+            stack.close()
+
+    def _close_playback_resources(self, _: object = None) -> None:
+        self._output_stream.close()

@@ -2,15 +2,19 @@ import asyncio
 import queue
 import threading
 from collections import deque
-from collections.abc import AsyncIterator, Iterator, Sequence
-from types import TracebackType
-from typing import Self
+from collections.abc import AsyncIterator, Iterator
 
 import numpy as np
 
-from henry_client.audio import AudioChunk, AudioFrame
-from henry_client.conversation.domain import Message, MessageChunk
+from henry_client.audio import AudioChunk, AudioFormat, AudioFrame
 from henry_client.events import AppEvent, AppEventSink
+from henry_client.reply import (
+    ReplyChunk,
+    ReplyLine,
+    ReplyRequest,
+    ReplySignal,
+    ReplyText,
+)
 
 
 def frame(
@@ -20,43 +24,39 @@ def frame(
     sample_rate: int = 16_000,
 ) -> AudioFrame:
     return AudioFrame(
+        format=AudioFormat(sample_rate=sample_rate),
         samples=np.full(samples_count, value, dtype=np.float32),
-        sample_rate=sample_rate,
-        channels=1,
     )
 
 
 def chunk(
     *,
-    speech_detected: bool = False,
-    speech_score: float = 0.0,
-    wakeword_detected: bool | None = None,
+    sequence_id: int = 1,
+    vad_score: float = 0.0,
     wakeword_score: float | None = None,
 ) -> AudioChunk:
-    source = frame()
-    return source.build_chunk(
-        speech_detected=speech_detected,
-        speech_score=speech_score,
-        wakeword_detected=wakeword_detected,
+    return AudioChunk(
+        sequence_id=sequence_id,
+        frame=frame(),
+        vad_score=vad_score,
         wakeword_score=wakeword_score,
     )
 
 
 class FakeInputStream:
-    def __init__(self) -> None:
+    def __init__(self, open_error: BaseException | None = None) -> None:
         self.items: queue.Queue[AudioFrame | BaseException] = queue.Queue()
         self.fallback = frame()
+        self.open_error = open_error
+        self.opened = False
 
-    def __enter__(self) -> Self:
-        return self
+    def open(self) -> None:
+        if self.open_error is not None:
+            raise self.open_error
+        self.opened = True
 
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        pass
+    def close(self) -> None:
+        self.opened = False
 
     def feed(self, *items: AudioFrame | BaseException) -> None:
         for item in items:
@@ -73,20 +73,24 @@ class FakeInputStream:
 
 
 class FakeOutputStream:
-    def __init__(self, error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        error: BaseException | None = None,
+        *,
+        open_error: BaseException | None = None,
+    ) -> None:
         self.frames: list[AudioFrame] = []
         self.error = error
+        self.open_error = open_error
+        self.opened = False
 
-    def __enter__(self) -> Self:
-        return self
+    def open(self) -> None:
+        if self.open_error is not None:
+            raise self.open_error
+        self.opened = True
 
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        pass
+    def close(self) -> None:
+        self.opened = False
 
     def write(self, value: AudioFrame) -> None:
         if self.error is not None:
@@ -97,17 +101,13 @@ class FakeOutputStream:
 class FakeVADModel:
     def __init__(self, *scores: float) -> None:
         self.scores = deque(scores)
+        self.opened = False
 
-    def __enter__(self) -> Self:
-        return self
+    def open(self) -> None:
+        self.opened = True
 
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        pass
+    def close(self) -> None:
+        self.opened = False
 
     def predict(self, value: AudioFrame) -> float:
         return self.scores.popleft() if self.scores else 0.0
@@ -118,17 +118,13 @@ class FakeWakeWordModel:
         self.scores = deque(scores)
         self.reset_threads: list[int] = []
         self.reset_event = threading.Event()
+        self.opened = False
 
-    def __enter__(self) -> Self:
-        return self
+    def open(self) -> None:
+        self.opened = True
 
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        pass
+    def close(self) -> None:
+        self.opened = False
 
     def predict(self, value: AudioFrame) -> float:
         return self.scores.popleft() if self.scores else 0.0
@@ -139,64 +135,65 @@ class FakeWakeWordModel:
 
 
 class FakeSTTModel:
-    def __init__(self, text: str | None = "transcript") -> None:
-        self.text = text
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
+    def __init__(
         self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
+        text: str | None = "transcript",
+        *,
+        open_error: BaseException | None = None,
+        transcription_error: BaseException | None = None,
     ) -> None:
-        pass
+        self.text = text
+        self.open_error = open_error
+        self.transcription_error = transcription_error
+        self.opened = False
+        self.thread_ids: list[int] = []
+
+    def open(self) -> None:
+        self.thread_ids.append(threading.get_ident())
+        if self.open_error is not None:
+            raise self.open_error
+        self.opened = True
+
+    def close(self) -> None:
+        self.thread_ids.append(threading.get_ident())
+        self.opened = False
 
     def transcribe(self, value: AudioFrame) -> str | None:
+        self.thread_ids.append(threading.get_ident())
+        if self.transcription_error is not None:
+            raise self.transcription_error
         return self.text
 
 
 class FakeTTSModel:
-    def __init__(self) -> None:
-        self.texts: list[str] = []
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
+    def __init__(
         self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
+        *,
+        open_error: BaseException | None = None,
+        synthesis_error: BaseException | None = None,
     ) -> None:
-        pass
+        self.texts: list[str] = []
+        self.open_error = open_error
+        self.synthesis_error = synthesis_error
+        self.opened = False
+        self.thread_ids: list[int] = []
+
+    def open(self) -> None:
+        self.thread_ids.append(threading.get_ident())
+        if self.open_error is not None:
+            raise self.open_error
+        self.opened = True
+
+    def close(self) -> None:
+        self.thread_ids.append(threading.get_ident())
+        self.opened = False
 
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
+        self.thread_ids.append(threading.get_ident())
+        if self.synthesis_error is not None:
+            raise self.synthesis_error
         self.texts.append(text)
         yield frame(value=float(len(self.texts)), sample_rate=22_050)
-
-
-class FakeLanguageModel:
-    def __init__(self, *parts: str) -> None:
-        self.parts = parts
-        self.messages: list[Sequence[Message]] = []
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        pass
-
-    def generate(self, messages: Sequence[Message]) -> Iterator[MessageChunk]:
-        self.messages.append(messages)
-        for part in self.parts:
-            yield MessageChunk(part)
 
 
 class RecordingEventSink(AppEventSink):
@@ -213,16 +210,27 @@ class FakeAudioService:
     def __init__(self) -> None:
         self.chunks: asyncio.Queue[AudioChunk | None] = asyncio.Queue()
         self.written: list[AudioFrame] = []
+        self.wakeword_enabled = False
+        self.wakeword_resets = 0
 
-    async def read(self) -> AsyncIterator[AudioChunk]:
+    async def capture(self) -> AsyncIterator[AudioChunk]:
         while True:
             value = await self.chunks.get()
             if value is None:
                 return
             yield value
 
-    async def write(self, value: AudioFrame) -> None:
+    async def playback(self, value: AudioFrame) -> None:
         self.written.append(value)
+
+    def enable_wakeword(self) -> None:
+        self.wakeword_enabled = True
+
+    def disable_wakeword(self) -> None:
+        self.wakeword_enabled = False
+
+    def reset_wakeword(self) -> None:
+        self.wakeword_resets += 1
 
 
 class FakeSpeechService:
@@ -230,7 +238,11 @@ class FakeSpeechService:
         self.transcript = transcript
         self.synthesized: list[str] = []
 
-    def detect(self, value: AudioChunk) -> tuple[bool, AudioFrame | None]:
+    def segment(
+        self,
+        value: AudioFrame,
+        speech_detected: bool,
+    ) -> tuple[bool, AudioFrame | None]:
         return True, frame(value=0.5)
 
     async def transcribe(self, value: AudioFrame) -> str | None:
@@ -241,15 +253,28 @@ class FakeSpeechService:
         yield frame(value=float(len(self.synthesized)), sample_rate=22_050)
 
 
-class FakeConversationService:
-    def __init__(self, *lines: str) -> None:
+class FakeReplyService:
+    def __init__(
+        self,
+        *lines: str,
+        activation_text: str | None = None,
+    ) -> None:
         self.lines = lines
-        self.received: list[str] = []
+        self.activation_text = activation_text
+        self.received: list[ReplyRequest] = []
 
-    async def generate_reply(self, text: str):
-        from henry_client.conversation import MessageLine
+    async def reply(self, request: ReplyRequest):
+        self.received.append(request)
+        if request is ReplySignal.ACTIVATION:
+            if self.activation_text is not None:
+                yield ReplyChunk(self.activation_text)
+                yield ReplyLine(self.activation_text)
+                yield ReplyText(self.activation_text)
+            else:
+                yield ReplyText("")
+            return
 
-        self.received.append(text)
         for line in self.lines:
-            yield MessageLine(line)
-        yield "\n".join(self.lines)
+            yield ReplyChunk(line)
+            yield ReplyLine(line)
+        yield ReplyText("\n".join(self.lines))

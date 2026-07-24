@@ -1,46 +1,22 @@
 import asyncio
-import queue
-import threading
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
 from types import TracebackType
 from typing import Self
 
 from loguru import logger
 
-from henry_common.concurrency import (
-    join_started_thread,
-    set_future_exception_if_pending,
-    set_future_result_if_pending,
-)
-
-from ..audio import AudioChunk, AudioFrame
+from ..audio import AudioFrame
 from .domain import SpeechSegmenter
 from .ports import STTModel, TTSModel
-
-type STTRequest = DoTranscribe | None
-type TTSRequest = DoSynthesize | None
-
-
-@dataclass(frozen=True, slots=True)
-class DoTranscribe:
-    frame: AudioFrame
-    response: asyncio.Future[str | None]
-
-
-@dataclass(frozen=True, slots=True)
-class DoSynthesize:
-    text: str
-    response: asyncio.Queue[AudioFrame | BaseException | None]
 
 
 class SpeechServiceError(RuntimeError): ...
 
 
 class SpeechService(AbstractAsyncContextManager):
-    _STT_THREAD_NAME = "SpeechService.stt_worker"
-    _TTS_THREAD_NAME = "SpeechService.tts_worker"
+    """Own STT and TTS model lifecycles in dedicated worker threads."""
 
     def __init__(
         self,
@@ -48,13 +24,12 @@ class SpeechService(AbstractAsyncContextManager):
         tts_model: TTSModel,
     ) -> None:
         self._segmenter = SpeechSegmenter()
-        self._stt_model = stt_model
-        self._stt_thread: threading.Thread | None = None
-        self._stt_requests: queue.Queue[STTRequest] = queue.Queue()
 
+        self._stt_executor: ThreadPoolExecutor | None = None
+        self._stt_model = stt_model
+
+        self._tts_executor: ThreadPoolExecutor | None = None
         self._tts_model = tts_model
-        self._tts_thread: threading.Thread | None = None
-        self._tts_requests: queue.Queue[TTSRequest] = queue.Queue()
 
         self._logger = logger.bind(component="SpeechService")
 
@@ -70,181 +45,133 @@ class SpeechService(AbstractAsyncContextManager):
     ) -> None:
         await self._stop()
 
-    def detect(self, chunk: AudioChunk) -> tuple[bool, AudioFrame | None]:
-        """Feed a VAD-enriched chunk into the utterance segmenter."""
-        return self._segmenter.feed(chunk)
+    def segment(
+        self,
+        frame: AudioFrame,
+        speech_detected: bool,
+    ) -> tuple[bool, AudioFrame | None]:
+        """Feed one VAD-classified frame into the utterance segmenter."""
+        return self._segmenter.feed(frame, speech_detected)
 
     async def transcribe(self, frame: AudioFrame) -> str | None:
-        """Transcribe one complete utterance in the STT worker."""
-        request = DoTranscribe(
-            frame=frame,
-            response=asyncio.Future(),
-        )
-        self._stt_requests.put_nowait(request)
-        return await request.response
+        """Transcribe one complete utterance in the STT executor."""
+        loop = asyncio.get_running_loop()
+        executor = self._require_stt_executor()
+        return await loop.run_in_executor(executor, self._stt_model.transcribe, frame)
 
     async def synthesize(self, text: str) -> AsyncIterator[AudioFrame]:
-        """Stream synthesized frames produced by the TTS worker."""
-        request = DoSynthesize(
-            text=text,
-            response=asyncio.Queue(),
-        )
-        self._tts_requests.put_nowait(request)
-
-        while True:
-            frame = await request.response.get()
-            if frame is None:
-                return
-            if isinstance(frame, BaseException):
-                raise frame
-            yield frame
-            request.response.task_done()
-
-    async def _start(self) -> None:
-        if self._stt_thread is not None or self._tts_thread is not None:
-            raise SpeechServiceError("Workers already started")
-
+        """Stream synthesized frames produced in the TTS executor."""
         loop = asyncio.get_running_loop()
-
-        stt_ready = loop.create_future()
-        self._stt_requests = queue.Queue()
-
-        tts_ready = loop.create_future()
-        self._tts_requests = queue.Queue()
+        executor = self._require_tts_executor()
+        responses: asyncio.Queue[AudioFrame | BaseException | None] = asyncio.Queue()
+        job = loop.run_in_executor(
+            executor,
+            self._run_synthesis,
+            text,
+            loop,
+            responses,
+        )
 
         try:
-            self._stt_thread = threading.Thread(
-                target=self._stt_worker,
-                args=(loop, stt_ready),
-                name=self._STT_THREAD_NAME,
+            while True:
+                response = await responses.get()
+                try:
+                    if response is None:
+                        break
+                    if isinstance(response, BaseException):
+                        raise response
+                    yield response
+                finally:
+                    responses.task_done()
+        finally:
+            await job
+
+    def _run_synthesis(
+        self,
+        text: str,
+        loop: asyncio.AbstractEventLoop,
+        responses: asyncio.Queue[AudioFrame | BaseException | None],
+    ) -> None:
+        try:
+            for frame in self._tts_model.synthesize(text):
+                loop.call_soon_threadsafe(responses.put_nowait, frame)
+            loop.call_soon_threadsafe(responses.put_nowait, None)
+        except BaseException as error:
+            loop.call_soon_threadsafe(responses.put_nowait, error)
+
+    def _require_stt_executor(self) -> ThreadPoolExecutor:
+        if self._stt_executor is None:
+            raise SpeechServiceError("STT executor is not open")
+        return self._stt_executor
+
+    def _require_tts_executor(self) -> ThreadPoolExecutor:
+        if self._tts_executor is None:
+            raise SpeechServiceError("TTS executor is not open")
+        return self._tts_executor
+
+    async def _start(self) -> None:
+        if self._stt_executor is not None:
+            raise SpeechServiceError("STT executor is already started")
+        if self._tts_executor is not None:
+            raise SpeechServiceError("TTS executor is already started")
+
+        loop = asyncio.get_running_loop()
+        try:
+            self._stt_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="SpeechService.stt",
             )
-
-            assert self._stt_thread is not None
-            self._stt_thread.start()
-            await stt_ready
-            self._logger.debug("STT worker READY")
-
-            self._tts_thread = threading.Thread(
-                target=self._tts_worker,
-                args=(loop, tts_ready),
-                name=self._TTS_THREAD_NAME,
+            await loop.run_in_executor(
+                self._stt_executor,
+                self._stt_model.open,
             )
+            self._logger.debug("STT executor STARTED")
 
-            assert self._tts_thread is not None
-            self._tts_thread.start()
-            await tts_ready
-            self._logger.debug("TTS worker READY")
+            self._tts_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="SpeechService.tts",
+            )
+            await loop.run_in_executor(
+                self._tts_executor,
+                self._tts_model.open,
+            )
+            self._logger.debug("TTS executor STARTED")
         except BaseException:
             await self._stop()
             raise
 
     async def _stop(self) -> None:
-        if self._stt_thread is not None:
-            self._stt_requests.put_nowait(None)
-            await join_started_thread(self._stt_thread)
-            self._stt_thread = None
-            self._logger.debug("STT worker STOPPED")
-
-        if self._tts_thread is not None:
-            self._tts_requests.put_nowait(None)
-            await join_started_thread(self._tts_thread)
-            self._tts_thread = None
-            self._logger.debug("TTS worker STOPPED")
-
-    def _stt_worker(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        ready: asyncio.Future[None],
-    ) -> None:
-        request: STTRequest | None = None
-
         try:
-            with self._stt_model as model:
-                loop.call_soon_threadsafe(
-                    set_future_result_if_pending,
-                    ready,
-                    None,
-                )
+            await self._stop_stt()
+        finally:
+            await self._stop_tts()
 
-                while True:
-                    request = self._stt_requests.get()
+    async def _stop_stt(self) -> None:
+        executor = self._stt_executor
+        if executor is None:
+            return
 
-                    if request is None:
-                        self._stt_requests.task_done()
-                        break
-
-                    try:
-                        text = model.transcribe(
-                            request.frame,
-                        )
-
-                        loop.call_soon_threadsafe(
-                            set_future_result_if_pending,
-                            request.response,
-                            text,
-                        )
-                    finally:
-                        self._stt_requests.task_done()
-        except BaseException as err:
-            loop.call_soon_threadsafe(
-                set_future_exception_if_pending,
-                ready,
-                err,
-            )
-            if request is not None:
-                loop.call_soon_threadsafe(
-                    set_future_exception_if_pending,
-                    request.response,
-                    err,
-                )
-
-    def _tts_worker(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        ready: asyncio.Future[None],
-    ) -> None:
-        request: TTSRequest | None = None
-
+        loop = asyncio.get_running_loop()
         try:
-            with self._tts_model as model:
-                loop.call_soon_threadsafe(
-                    set_future_result_if_pending,
-                    ready,
-                    None,
-                )
+            await loop.run_in_executor(executor, self._stt_model.close)
+        finally:
+            try:
+                await asyncio.to_thread(executor.shutdown)
+            finally:
+                self._stt_executor = None
+                self._logger.debug("STT executor STOPPED")
 
-                while True:
-                    request = self._tts_requests.get()
+    async def _stop_tts(self) -> None:
+        executor = self._tts_executor
+        if executor is None:
+            return
 
-                    if request is None:
-                        self._tts_requests.task_done()
-                        break
-
-                    try:
-                        frames = model.synthesize(
-                            request.text,
-                        )
-
-                        for frame in frames:
-                            loop.call_soon_threadsafe(
-                                request.response.put_nowait,
-                                frame,
-                            )
-
-                        loop.call_soon_threadsafe(
-                            request.response.put_nowait,
-                            None,
-                        )
-                    finally:
-                        self._tts_requests.task_done()
-        except BaseException as err:
-            loop.call_soon_threadsafe(
-                set_future_exception_if_pending,
-                ready,
-                err,
-            )
-            if request is not None:
-                loop.call_soon_threadsafe(
-                    request.response.put_nowait,
-                    err,
-                )
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(executor, self._tts_model.close)
+        finally:
+            try:
+                await asyncio.to_thread(executor.shutdown)
+            finally:
+                self._tts_executor = None
+                self._logger.debug("TTS executor STOPPED")

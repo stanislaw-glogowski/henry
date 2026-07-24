@@ -1,6 +1,3 @@
-from types import TracebackType
-from typing import Self
-
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
@@ -28,20 +25,9 @@ class OpenWakeWordModel(WakeWordModel):
         self._samples_buffer = np.empty(0, dtype=np.float32)
         self._logger = logger.bind(component="OpenWakeWordModel")
 
-    def __enter__(self) -> Self:
-        self._open()
-        return self
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self._close()
-
     def predict(self, frame: AudioFrame) -> float:
-        model = self._require_model()
+        if self._model is None:
+            raise OpenWakeWordModelError("Model is not loaded")
 
         incoming_samples: NDArray[np.float32] = np.asarray(
             frame.samples,
@@ -88,7 +74,7 @@ class OpenWakeWordModel(WakeWordModel):
                 dtype=np.int16,
             )
 
-            scores = model.predict(pcm16_chunk)
+            scores = self._model.predict(pcm16_chunk)
 
             for score in scores.values():
                 highest_score = max(highest_score, float(score))
@@ -101,7 +87,7 @@ class OpenWakeWordModel(WakeWordModel):
         if self._model is not None:
             self._model.reset()
 
-    def _open(self) -> None:
+    def open(self) -> None:
         if self._model is not None:
             raise OpenWakeWordModelError("Model is already loaded")
 
@@ -126,16 +112,10 @@ class OpenWakeWordModel(WakeWordModel):
 
         self._logger.debug("Model READY")
 
-    def _close(self) -> None:
+    def close(self) -> None:
         if self._model is None:
             return
 
         self._model = None
         self._samples_buffer = np.empty(0, dtype=np.float32)
         self._logger.debug("Model CLOSED")
-
-    def _require_model(self) -> Model:
-        if self._model is None:
-            raise OpenWakeWordModelError("Model is not loaded")
-
-        return self._model

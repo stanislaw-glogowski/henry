@@ -186,7 +186,6 @@ Run either command with `--help` for the complete argument reference.
 | `henry_client`    | Domain models, ports, adapters, services, and orchestration        |
 | `henry_cli`       | Textual UI, telemetry snapshots, pipeline state, and buffered logs |
 | `henry_debugger`  | Lightweight event and lifecycle diagnostics                        |
-| `henry_common`    | Event-loop/thread handoff helpers                                  |
 | `henry_resources` | Resolution of local data and model paths                           |
 
 The event loop runs capture, transcription, processing, and replay tasks. Blocking
@@ -196,7 +195,7 @@ operations live in long-running workers:
 - audio output owns the PyAudio output stream;
 - STT owns Parakeet and its MLX runtime;
 - TTS owns Piper;
-- conversation owns the MLX language model.
+- reply owns the MLX language model.
 
 Worker-side requests use `queue.Queue`. Results return to asyncio queues or
 futures through `loop.call_soon_threadsafe(...)`.

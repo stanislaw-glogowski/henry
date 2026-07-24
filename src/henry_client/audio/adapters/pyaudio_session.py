@@ -28,7 +28,10 @@ class PyAudioSession(AbstractContextManager):
 
     @property
     def driver(self) -> pyaudio.PyAudio:
-        return self._require_driver()
+        if self._driver is None:
+            raise PyAudioSessionError("Session is not open")
+
+        return self._driver
 
     def _open(self) -> None:
         if self._driver is not None:
@@ -44,7 +47,7 @@ class PyAudioSession(AbstractContextManager):
         output_device = self._driver.get_default_output_device_info()
 
         self._logger.debug(
-            "Session OPENED: input_devic='{}', output_device='{}'",
+            "Session OPENED: input_device='{}', output_device='{}'",
             input_device.get("name"),
             output_device.get("name"),
         )
@@ -57,9 +60,3 @@ class PyAudioSession(AbstractContextManager):
         self._driver = None
 
         self._logger.debug("Session TERMINATED")
-
-    def _require_driver(self) -> pyaudio.PyAudio:
-        if self._driver is None:
-            raise PyAudioSessionError("Session is not open")
-
-        return self._driver

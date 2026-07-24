@@ -44,7 +44,6 @@ exclude-dependencies = [
 packages = [
     "src/henry_cli",
     "src/henry_client",
-    "src/henry_common",
     "src/henry_debugger",
     "src/henry_resources",
 ]

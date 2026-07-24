@@ -1,6 +1,4 @@
 from collections.abc import Iterator
-from types import TracebackType
-from typing import Self
 
 import numpy as np
 from huggingface_hub import hf_hub_download
@@ -8,7 +6,7 @@ from huggingface_hub.utils import disable_progress_bars
 from loguru import logger
 from piper import PiperVoice, SynthesisConfig
 
-from ...audio import AudioFrame
+from ...audio import AudioFormat, AudioFrame
 from ..ports import TTSModel
 
 REPOSITORY_ID = "rhasspy/piper-voices"
@@ -37,22 +35,11 @@ class PiperTTSModel(TTSModel):
         self._model: PiperVoice | None = None
         self._logger = logger.bind(component="PiperTTSModel")
 
-    def __enter__(self) -> Self:
-        self._open()
-        return self
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self._close()
-
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
-        model = self._require_model()
+        if self._model is None:
+            raise PiperTTSError("Model is not loaded")
 
-        chunks = model.synthesize(
+        chunks = self._model.synthesize(
             text=text,
             include_alignments=False,
             syn_config=SynthesisConfig(
@@ -71,11 +58,10 @@ class PiperTTSModel(TTSModel):
 
             yield AudioFrame(
                 samples=samples,
-                sample_rate=chunk.sample_rate,
-                channels=chunk.sample_channels,
+                format=AudioFormat(chunk.sample_rate),
             )
 
-    def _open(self) -> None:
+    def open(self) -> None:
         if self._model is not None:
             raise PiperTTSError("Model is already loaded")
 
@@ -104,15 +90,9 @@ class PiperTTSModel(TTSModel):
 
         self._logger.debug("Model READY")
 
-    def _close(self) -> None:
+    def close(self) -> None:
         if self._model is None:
             return
 
         self._model = None
         self._logger.debug("Model CLOSED")
-
-    def _require_model(self) -> PiperVoice:
-        if self._model is None:
-            raise PiperTTSError("Model is not loaded")
-
-        return self._model

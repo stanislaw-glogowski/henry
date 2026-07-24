@@ -27,22 +27,22 @@ def test_audio_service_reads_analysis_and_writes_frames() -> None:
         )
 
         async with service:
-            chunks = service.read()
+            chunks = service.capture()
             value = await asyncio.wait_for(anext(chunks), timeout=1)
-            await service.write(frame(sample_rate=22_050))
+            await service.playback(frame(sample_rate=22_050))
             await chunks.aclose()
 
-        assert value.speech_detected
-        assert value.wakeword_detected
+        assert value.vad_score == 0.9
+        assert value.wakeword_score == 0.8
         assert len(output_stream.frames) == 1
 
     asyncio.run(scenario())
 
 
-def test_audio_service_disables_wakeword_after_detection() -> None:
+def test_audio_service_can_disable_wakeword_analysis() -> None:
     async def scenario() -> None:
         input_stream = FakeInputStream()
-        input_stream.feed(frame(), frame())
+        input_stream.feed(frame())
         service = AudioService(
             input_stream=input_stream,
             output_stream=FakeOutputStream(),
@@ -51,13 +51,17 @@ def test_audio_service_disables_wakeword_after_detection() -> None:
         )
 
         async with service:
-            chunks = service.read()
+            chunks = service.capture()
             first = await asyncio.wait_for(anext(chunks), timeout=1)
-            second = await asyncio.wait_for(anext(chunks), timeout=1)
+            service.disable_wakeword()
+            input_stream.feed(frame())
+            while True:
+                second = await asyncio.wait_for(anext(chunks), timeout=1)
+                if second.wakeword_score is None:
+                    break
             await chunks.aclose()
 
-        assert first.wakeword_detected is True
-        assert second.wakeword_detected is None
+        assert first.wakeword_score == 0.8
         assert second.wakeword_score is None
 
     asyncio.run(scenario())
@@ -75,9 +79,9 @@ def test_audio_service_resets_wakeword_in_input_worker() -> None:
         )
 
         async with service:
-            service.enable_wakeword()
+            service.reset_wakeword()
             input_stream.feed(frame())
-            chunks = service.read()
+            chunks = service.capture()
             await asyncio.wait_for(anext(chunks), timeout=1)
             await asyncio.wait_for(
                 asyncio.to_thread(wakeword.reset_event.wait),
@@ -104,7 +108,7 @@ def test_audio_service_propagates_input_failure() -> None:
 
         async with service:
             with pytest.raises(RuntimeError, match="read failed"):
-                await asyncio.wait_for(anext(service.read()), timeout=1)
+                await asyncio.wait_for(anext(service.capture()), timeout=1)
 
     asyncio.run(scenario())
 
@@ -121,7 +125,7 @@ def test_audio_service_propagates_output_failure() -> None:
         async with service:
             with pytest.raises(RuntimeError, match="write failed"):
                 await asyncio.wait_for(
-                    service.write(frame(sample_rate=22_050)),
+                    service.playback(frame(sample_rate=22_050)),
                     timeout=1,
                 )
 
@@ -138,8 +142,37 @@ def test_audio_service_can_restart() -> None:
         )
 
         async with service:
-            pass
+            chunks = service.capture()
+            await asyncio.wait_for(anext(chunks), timeout=1)
+            await chunks.aclose()
         async with service:
-            pass
+            chunks = service.capture()
+            await asyncio.wait_for(anext(chunks), timeout=1)
+            await chunks.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_audio_service_cleans_up_capture_when_playback_startup_fails() -> None:
+    async def scenario() -> None:
+        input_stream = FakeInputStream()
+        vad_model = FakeVADModel()
+        wakeword_model = FakeWakeWordModel()
+        service = AudioService(
+            input_stream=input_stream,
+            output_stream=FakeOutputStream(
+                open_error=RuntimeError("output startup failed"),
+            ),
+            vad_model=vad_model,
+            wakeword_model=wakeword_model,
+        )
+
+        with pytest.raises(RuntimeError, match="output startup failed"):
+            async with service:
+                pass
+
+        assert not input_stream.opened
+        assert not vad_model.opened
+        assert not wakeword_model.opened
 
     asyncio.run(scenario())

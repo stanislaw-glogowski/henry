@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from loguru import logger
 
 from .audio.service import AudioService
-from .conversation.service import ConversationService
+from .config import VADConfig, WakeWordConfig
 from .events import AppEventSink
 from .orchestrator import Orchestrator
 from .profiles import Profile
+from .reply.service import ReplyService
 from .speech.service import SpeechService
 
 
@@ -15,6 +16,8 @@ from .speech.service import SpeechService
 class AppConfig:
     profile: Profile
     language_model: str
+    vad: VADConfig = VADConfig()
+    wakeword: WakeWordConfig = WakeWordConfig()
 
 
 class App:
@@ -35,7 +38,7 @@ class App:
             PyAudioStream,
             SileroVADModel,
         )
-        from .conversation.adapters import MLXLanguageModel
+        from .reply.adapters.mlx_lm import MLXResponder, MLXResponderConfig
         from .speech.adapters import ParakeetSTTModel, PiperTTSModel
 
         self._logger.debug("Starting")
@@ -43,13 +46,25 @@ class App:
         with PyAudioSession() as audio_session:
             audio_input = PyAudioStream.input(audio_session)
             audio_output = PyAudioStream.output(audio_session)
-            wakeword_model = OpenWakeWordModel(self._config.profile.wakeword_model)
+            wakeword_model = OpenWakeWordModel(
+                self._config.wakeword.model_path or self._config.profile.wakeword_model
+            )
             vad_model = SileroVADModel()
 
             stt_model = ParakeetSTTModel()
             tts_model = PiperTTSModel(self._config.profile.voice_model)
 
-            language_model = MLXLanguageModel(self._config.language_model)
+            responder = MLXResponder(
+                config=MLXResponderConfig(
+                    model_id=self._config.language_model,
+                    system_prompt=self._config.profile.system_prompt,
+                    activation_text=(
+                        self._config.wakeword.reply_message
+                        if self._config.wakeword.reply_message is not None
+                        else self._config.profile.wakeword_reply
+                    ),
+                ),
+            )
 
             async with (
                 AudioService(
@@ -62,15 +77,15 @@ class App:
                     stt_model=stt_model,
                     tts_model=tts_model,
                 ) as speech_service,
-                ConversationService(
-                    system_prompt=self._config.profile.system_prompt,
-                    model=language_model,
-                ) as conversation_service,
+                ReplyService(
+                    responder=responder,
+                ) as reply_service,
             ):
                 await Orchestrator(
                     audio=audio_service,
-                    conversation=conversation_service,
+                    reply=reply_service,
                     speech=speech_service,
                     events=self._events,
-                    wakeword_reply_text=self._config.profile.wakeword_reply,
+                    vad_config=self._config.vad,
+                    wakeword_config=self._config.wakeword,
                 ).run(shutdown)
