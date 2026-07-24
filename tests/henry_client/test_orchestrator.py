@@ -10,6 +10,7 @@ from tests.support import (
     FakeSpeechService,
     RecordingEventSink,
     chunk,
+    frame,
 )
 
 
@@ -17,15 +18,31 @@ async def wait_for_event(
     sink: RecordingEventSink,
     stage: PipelineStage,
     status: PipelineStageStatus,
+    count: int = 1,
 ) -> None:
-    while not any(
-        isinstance(event, PipelineStageChanged)
-        and event.stage is stage
-        and event.status is status
-        for event in sink.events
+    while (
+        sum(
+            isinstance(event, PipelineStageChanged)
+            and event.stage is stage
+            and event.status is status
+            for event in sink.events
+        )
+        < count
     ):
         sink.changed.clear()
         await asyncio.wait_for(sink.changed.wait(), timeout=1)
+
+
+class SequencedSpeechService(FakeSpeechService):
+    def __init__(self, *segments) -> None:
+        super().__init__()
+        self._segments = iter(segments)
+        self.segmented: asyncio.Queue[None] = asyncio.Queue()
+
+    def segment(self, value, speech_detected):
+        result = next(self._segments)
+        self.segmented.put_nowait(None)
+        return True, result
 
 
 def test_orchestrator_plays_activation_reply_then_records() -> None:
@@ -153,5 +170,114 @@ def test_orchestrator_waits_after_activation_playback_before_recording() -> None
 
         shutdown.set()
         await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_orchestrator_returns_to_wakeword_after_empty_segment_limit() -> None:
+    async def scenario() -> None:
+        audio = FakeAudioService()
+        speech = SequencedSpeechService(None, None)
+        events = RecordingEventSink()
+        shutdown = asyncio.Event()
+        orchestrator = Orchestrator(
+            audio=audio,
+            speech=speech,
+            reply=FakeReplyService(),
+            events=events,
+            activation_end_delay=0,
+            max_empty_segments=2,
+        )
+
+        task = asyncio.create_task(orchestrator.run(shutdown))
+        await wait_for_event(
+            events,
+            PipelineStage.LISTENING,
+            PipelineStageStatus.STARTED,
+        )
+        await audio.chunks.put(chunk(vad_score=0.9, wakeword_score=0.9))
+        await wait_for_event(
+            events,
+            PipelineStage.RECORDING,
+            PipelineStageStatus.STARTED,
+        )
+
+        await audio.chunks.put(chunk())
+        await asyncio.wait_for(speech.segmented.get(), timeout=1)
+        assert orchestrator._listening_mode is ListeningMode.UTTERANCE
+        assert not audio.wakeword_enabled
+
+        await audio.chunks.put(chunk())
+        await wait_for_event(
+            events,
+            PipelineStage.LISTENING,
+            PipelineStageStatus.STARTED,
+            count=2,
+        )
+
+        shutdown.set()
+        await asyncio.wait_for(task, timeout=1)
+
+        assert orchestrator._listening_mode is ListeningMode.WAKEWORD
+        assert audio.wakeword_enabled
+        assert audio.wakeword_resets == 2
+
+    asyncio.run(scenario())
+
+
+def test_orchestrator_resets_empty_segment_count_after_utterance() -> None:
+    async def scenario() -> None:
+        audio = FakeAudioService()
+        speech = SequencedSpeechService(None, frame(), None, None)
+        events = RecordingEventSink()
+        shutdown = asyncio.Event()
+        orchestrator = Orchestrator(
+            audio=audio,
+            speech=speech,
+            reply=FakeReplyService(),
+            events=events,
+            activation_end_delay=0,
+            max_empty_segments=2,
+        )
+
+        task = asyncio.create_task(orchestrator.run(shutdown))
+        await wait_for_event(
+            events,
+            PipelineStage.LISTENING,
+            PipelineStageStatus.STARTED,
+        )
+        await audio.chunks.put(chunk(vad_score=0.9, wakeword_score=0.9))
+        await wait_for_event(
+            events,
+            PipelineStage.RECORDING,
+            PipelineStageStatus.STARTED,
+        )
+
+        await audio.chunks.put(chunk())
+        await asyncio.wait_for(speech.segmented.get(), timeout=1)
+        await audio.chunks.put(chunk(vad_score=0.9))
+        await wait_for_event(
+            events,
+            PipelineStage.RECORDING,
+            PipelineStageStatus.STARTED,
+            count=2,
+        )
+
+        await audio.chunks.put(chunk())
+        await asyncio.wait_for(speech.segmented.get(), timeout=1)
+        assert orchestrator._listening_mode is ListeningMode.UTTERANCE
+
+        await audio.chunks.put(chunk())
+        await wait_for_event(
+            events,
+            PipelineStage.LISTENING,
+            PipelineStageStatus.STARTED,
+            count=2,
+        )
+
+        shutdown.set()
+        await asyncio.wait_for(task, timeout=1)
+
+        assert orchestrator._listening_mode is ListeningMode.WAKEWORD
 
     asyncio.run(scenario())

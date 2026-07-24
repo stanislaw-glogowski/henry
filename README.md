@@ -39,8 +39,8 @@ Microphone (16 kHz)
 
 Henry begins in wake-word mode. After activation it plays a preloaded spoken
 acknowledgement and enters utterance mode. The current implementation keeps the
-conversation session active after that first activation; it does not require the
-wake word again before every follow-up.
+conversation session active for follow-ups and returns to wake-word mode after a
+configurable number of consecutive empty utterance timeouts.
 
 ## 📦 Requirements
 
@@ -169,6 +169,7 @@ over environment variables, which take precedence over the application defaults.
 | `--wakeword-model`    | `HENRY_WAKEWORD_MODEL`  | `Hey_Henree_20260406_162745.onnx`         | `alexa_v0.1.onnx`                               |
 | `--voice-model`       | `HENRY_VOICE_MODEL`     | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` |
 | `--language-model`    | `HENRY_LANGUAGE_MODEL`  | `mlx-community/Qwen3.5-9B-OptiQ-4bit`     | `mlx-community/Qwen3.5-4B-MLX-4bit`             |
+| `--max-empty-segments` | `HENRY_MAX_EMPTY_SEGMENTS` | `3`                                    | `3`                                             |
 
 For example:
 

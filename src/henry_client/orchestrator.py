@@ -40,9 +40,12 @@ class Orchestrator:
         vad_config: VADConfig | None = None,
         wakeword_config: WakeWordConfig | None = None,
         activation_end_delay: float = 0.5,
+        max_empty_segments: int = 3,
     ) -> None:
         if activation_end_delay < 0:
             raise ValueError("Activation end delay cannot be negative")
+        if max_empty_segments < 1:
+            raise ValueError("Maximum empty segments must be positive")
 
         self._audio = audio
         self._reply = reply
@@ -51,12 +54,14 @@ class Orchestrator:
         self._vad_config = vad_config or VADConfig()
         self._wakeword_config = wakeword_config or WakeWordConfig()
         self._activation_end_delay = activation_end_delay
+        self._max_empty_segments = max_empty_segments
         self._logger = logger.bind(component="Orchestrator")
 
         self._segments: asyncio.Queue[AudioFrame] = asyncio.Queue()
         self._requests: asyncio.Queue[ReplyRequest] = asyncio.Queue()
         self._playback: asyncio.Queue[str | _PlaybackEnd] = asyncio.Queue()
         self._listening_mode = ListeningMode.UNKNOWN
+        self._empty_segments = 0
 
     async def run(
         self,
@@ -104,6 +109,7 @@ class Orchestrator:
 
         match mode:
             case ListeningMode.WAKEWORD:
+                self._empty_segments = 0
                 self._audio.reset_wakeword()
                 self._audio.enable_wakeword()
                 self._logger.debug("Listening STARTED")
@@ -168,9 +174,21 @@ class Orchestrator:
                             chunk.frame,
                             speech_detected,
                         )
-                        if segment_ended and segment is not None:
-                            self._set_listening_mode(ListeningMode.PAUSED)
-                            self._segments.put_nowait(segment)
+                        if not segment_ended:
+                            continue
+                        if segment is None:
+                            self._empty_segments += 1
+                            if self._empty_segments >= self._max_empty_segments:
+                                self._logger.debug(
+                                    "Empty segment limit reached: count={}",
+                                    self._empty_segments,
+                                )
+                                self._set_listening_mode(ListeningMode.WAKEWORD)
+                            continue
+
+                        self._empty_segments = 0
+                        self._set_listening_mode(ListeningMode.PAUSED)
+                        self._segments.put_nowait(segment)
         finally:
             self._events.publish(
                 PipelineStageChanged(

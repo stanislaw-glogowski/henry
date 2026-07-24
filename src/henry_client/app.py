@@ -18,6 +18,7 @@ class AppConfig:
     language_model: str
     vad: VADConfig = VADConfig()
     wakeword: WakeWordConfig = WakeWordConfig()
+    max_empty_segments: int = 3
 
 
 class App:
@@ -88,4 +89,5 @@ class App:
                     events=self._events,
                     vad_config=self._config.vad,
                     wakeword_config=self._config.wakeword,
+                    max_empty_segments=self._config.max_empty_segments,
                 ).run(shutdown)

@@ -16,6 +16,7 @@ ENV_VARS = (
     "HENRY_WAKEWORD_MODEL",
     "HENRY_VOICE_MODEL",
     "HENRY_LANGUAGE_MODEL",
+    "HENRY_MAX_EMPTY_SEGMENTS",
 )
 
 
@@ -38,6 +39,7 @@ def test_console_entrypoints_are_synchronous() -> None:
                 "wakeword_model": "Hey_Henree_20260406_162745.onnx",
                 "voice_model": "pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
                 "language_model": "mlx-community/Qwen3.5-9B-OptiQ-4bit",
+                "max_empty_segments": 3,
             },
         ),
         (
@@ -51,6 +53,7 @@ def test_console_entrypoints_are_synchronous() -> None:
                 "wakeword_model": "alexa_v0.1.onnx",
                 "voice_model": "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
                 "language_model": "mlx-community/Qwen3.5-4B-MLX-4bit",
+                "max_empty_segments": 3,
             },
         ),
     ],
@@ -82,6 +85,7 @@ def test_environment_overrides_default(monkeypatch, parse_args) -> None:
         "HENRY_WAKEWORD_MODEL": "wakeword.onnx",
         "HENRY_VOICE_MODEL": "voice.onnx",
         "HENRY_LANGUAGE_MODEL": "local/model",
+        "HENRY_MAX_EMPTY_SEGMENTS": "5",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -97,4 +101,5 @@ def test_environment_overrides_default(monkeypatch, parse_args) -> None:
         "wakeword_model": "wakeword.onnx",
         "voice_model": "voice.onnx",
         "language_model": "local/model",
+        "max_empty_segments": 5,
     }

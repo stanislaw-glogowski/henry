@@ -27,6 +27,7 @@ async def run(config: argparse.Namespace) -> None:
                 voice_model=config.voice_model,
             ),
             language_model=config.language_model,
+            max_empty_segments=config.max_empty_segments,
         ),
         events=events,
     )
@@ -95,9 +96,20 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
         help="MLX language model id or path (env: HENRY_LANGUAGE_MODEL).",
     )
+    parser.add_argument(
+        "--max-empty-segments",
+        type=int,
+        default=os.getenv("HENRY_MAX_EMPTY_SEGMENTS", "3"),
+        help=(
+            "Empty utterance timeouts before returning to wake-word mode "
+            "(env: HENRY_MAX_EMPTY_SEGMENTS)."
+        ),
+    )
     config = parser.parse_args(argv)
     if config.profile_kind not in profile_kinds:
         parser.error("HENRY_PROFILE_KIND must be one of: " + ", ".join(profile_kinds))
+    if config.max_empty_segments < 1:
+        parser.error("HENRY_MAX_EMPTY_SEGMENTS must be positive")
     return config
 
 
