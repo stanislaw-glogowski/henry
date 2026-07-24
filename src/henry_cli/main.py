@@ -4,34 +4,37 @@ import os
 import signal
 from collections.abc import Sequence
 
-from henry_cli.events import EventBridge
-from henry_cli.logs import LogBuffer
+from henry_cli.events import EventBridge, EventLogger
+from henry_cli.logs import LogBuffer, configure_console_logger
 from henry_cli.ui import Layout
 from henry_client import App, AppConfig, Profile, ProfileKind
 
 
 async def run(config: argparse.Namespace) -> None:
-    """Run the terminal UI and assistant in one asyncio event loop."""
-    logs = LogBuffer(config.log_level)
-    events = EventBridge()
+    """Run the assistant with terminal UI or console event logging."""
     shutdown = _configure_shutdown()
 
-    app = App(
-        config=AppConfig(
-            profile=Profile.build(
-                kind=ProfileKind[config.profile_kind.upper()],
-                name=config.profile_name,
-                system_language=config.system_language,
-                wakeword_reply=config.wakeword_reply,
-                wakeword_model=config.wakeword_model,
-                voice_model=config.voice_model,
-            ),
-            language_model=config.language_model,
-            max_empty_segments=config.max_empty_segments,
+    app_config = AppConfig(
+        profile=Profile.build(
+            kind=ProfileKind[config.profile_kind.upper()],
+            name=config.profile_name,
+            system_language=config.system_language,
+            wakeword_reply=config.wakeword_reply,
+            wakeword_model=config.wakeword_model,
+            voice_model=config.voice_model,
         ),
-        events=events,
+        language_model=config.language_model,
+        max_empty_segments=config.max_empty_segments,
     )
 
+    if config.no_ui:
+        configure_console_logger(config.log_level)
+        await App(config=app_config, events=EventLogger()).run(shutdown)
+        return
+
+    logs = LogBuffer(config.log_level)
+    events = EventBridge()
+    app = App(config=app_config, events=events)
     layout = Layout(
         logs=logs,
         events=events,
@@ -49,8 +52,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Henry's terminal UI.")
+    parser = argparse.ArgumentParser(description="Run Henry.")
     profile_kinds = [kind.name.lower() for kind in ProfileKind]
+    parser.add_argument(
+        "-noui",
+        "--no-ui",
+        action="store_true",
+        help="Run with console event logging instead of the terminal UI.",
+    )
     parser.add_argument(
         "--log-level",
         default=os.getenv("HENRY_LOG_LEVEL", "DEBUG"),

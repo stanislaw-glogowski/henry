@@ -1,6 +1,8 @@
 import asyncio
 from dataclasses import dataclass
 
+from loguru import logger
+
 from henry_client.events import (
     AppEvent,
     AppEventSink,
@@ -8,6 +10,17 @@ from henry_client.events import (
     AudioPlayed,
     TelemetryEvent,
 )
+
+
+class EventLogger(AppEventSink):
+    """Write application events to the configured Loguru sink."""
+
+    def __init__(self) -> None:
+        self._logger = logger.bind(component="EventTracker")
+
+    def publish(self, *events: AppEvent) -> None:
+        for event in events:
+            self._logger.trace("{}", event, event=event.__class__.__name__)
 
 
 @dataclass(frozen=True, slots=True)

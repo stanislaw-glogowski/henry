@@ -1,7 +1,25 @@
+import sys
 from collections import deque
 from threading import Lock
 
 from loguru import logger
+
+
+def configure_console_logger(level: str = "DEBUG") -> None:
+    """Configure lifecycle and event logs for non-UI operation."""
+    logger.remove()
+    logger.configure(extra={"component": "App", "event": ""})
+    logger.add(
+        sys.stdout,
+        level=level,
+        format=(
+            "<green>{time:HH:mm:ss.SSS}</green> | "
+            "<level>{level: <6}</level> | "
+            "<magenta>@{extra[component]}</magenta> | "
+            "<level>{message}</level>"
+        ),
+        colorize=True,
+    )
 
 
 class LogBuffer:
