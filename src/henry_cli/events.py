@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from henry_client.events import (
+from henry_speech.events import (
     AppEvent,
     AppEventSink,
     AudioCaptured,

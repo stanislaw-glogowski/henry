@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from henry_cli.events import EventBridge, EventLogger
 from henry_cli.logs import LogBuffer, configure_console_logger
 from henry_cli.ui import Layout
-from henry_client import App, AppConfig, Profile, ProfileKind
+from henry_speech import App, AppConfig, Profile, ProfileKind
 
 
 async def run(config: argparse.Namespace) -> None:

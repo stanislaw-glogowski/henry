@@ -1,33 +1,33 @@
 import numpy as np
-from loguru import logger
 from numpy.typing import NDArray
-from openwakeword.model import Model
+from openwakeword import Model
 
-from henry_common import ensure_file_path
+from henry_common import PathLocator
 
-from ..domain import AudioFrame
-from ..ports import WakeWordModel
-
-
-class OpenWakeWordModelError(RuntimeError): ...
+from ....audio import AudioFrame
+from ...ports import WakeWordModel
+from .common import MODELS_PATH
 
 
 class OpenWakeWordModel(WakeWordModel):
-    _MODELS_DIR = "openwakeword"
-    _MELSPEC_MODEL_PATH = "melspectrogram.onnx"
-    _EMBEDDING_MODEL_PATH = "embedding_model.onnx"
+    _MELSPEC_PATH = "melspectrogram.onnx"
+    _EMBEDDING_PATH = "embedding_model.onnx"
     _NUM_CPU = 1
     _FRAME_SIZE = 1280
 
-    def __init__(self, model_path: str) -> None:
-        self._model_path = model_path
+    def __init__(self, locator: PathLocator, model_path: str) -> None:
+        super().__init__()
         self._model: Model | None = None
+        self._model_path = locator.ensure_model_path(MODELS_PATH, model_path)
+        self._melspec_path = locator.ensure_model_path(MODELS_PATH, self._MELSPEC_PATH)
+        self._embedding_path = locator.ensure_model_path(
+            MODELS_PATH, self._EMBEDDING_PATH
+        )
         self._samples_buffer = np.empty(0, dtype=np.float32)
-        self._logger = logger.bind(component="OpenWakeWordModel")
 
     def predict(self, frame: AudioFrame) -> float:
         if self._model is None:
-            raise OpenWakeWordModelError("Model is not loaded")
+            raise RuntimeError("Model is not loaded")
 
         incoming_samples: NDArray[np.float32] = np.asarray(
             frame.samples,
@@ -89,22 +89,18 @@ class OpenWakeWordModel(WakeWordModel):
 
     def open(self) -> None:
         if self._model is not None:
-            raise OpenWakeWordModelError("Model is already loaded")
+            raise RuntimeError("Model is already loaded")
 
-        self._logger.debug("Loading model: model_path='{}'", self._model_path)
-
-        melspec_path = ensure_file_path(self._MODELS_DIR, self._MELSPEC_MODEL_PATH)
-        embedding_path = ensure_file_path(self._MODELS_DIR, self._EMBEDDING_MODEL_PATH)
-        wakeword_path = ensure_file_path(self._MODELS_DIR, self._model_path)
+        self._logger.debug("Loading model: model_path='{}'", self._model_path.name)
 
         self._model = Model(
             inference_framework="onnx",
             wakeword_models=[
-                str(wakeword_path),
+                str(self._model_path),
             ],
             **{
-                "melspec_model_path": str(melspec_path),
-                "embedding_model_path": str(embedding_path),
+                "melspec_model_path": str(self._melspec_path),
+                "embedding_model_path": str(self._embedding_path),
                 "ncpu": self._NUM_CPU,
                 "device": "cpu",
             },

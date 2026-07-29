@@ -108,28 +108,28 @@ def test_app_composes_services_and_forwards_configuration(
         async def run(self, shutdown):
             recorded["shutdown"] = shutdown
 
-    audio_adapters = ModuleType("henry_client.audio.adapters")
+    audio_adapters = ModuleType("henry_client.audio.openwakeword")
     audio_adapters.OpenWakeWordModel = FakeWakeWordModel
     audio_adapters.PyAudioSession = FakePyAudioSession
     audio_adapters.PyAudioStream = FakePyAudioStream
     audio_adapters.SileroVADModel = FakeVADModel
 
-    speech_adapters = ModuleType("henry_client.speech.adapters")
+    speech_adapters = ModuleType("henry_client.speech.openwakeword")
     speech_adapters.ParakeetSTTModel = FakeSTTModel
     speech_adapters.PiperTTSModel = FakeTTSModel
 
-    reply_adapters = ModuleType("henry_client.reply.adapters")
+    reply_adapters = ModuleType("henry_client.reply.openwakeword")
     reply_adapters.__path__ = []
-    reply_adapter = ModuleType("henry_client.reply.adapters.mlx_lm")
+    reply_adapter = ModuleType("henry_client.reply.openwakeword.mlx_lm")
     reply_adapter.MLXResponder = FakeResponder
     reply_adapter.MLXResponderConfig = FakeResponderConfig
 
-    monkeypatch.setitem(sys.modules, "henry_client.audio.adapters", audio_adapters)
-    monkeypatch.setitem(sys.modules, "henry_client.speech.adapters", speech_adapters)
-    monkeypatch.setitem(sys.modules, "henry_client.reply.adapters", reply_adapters)
+    monkeypatch.setitem(sys.modules, "henry_client.audio.openwakeword", audio_adapters)
+    monkeypatch.setitem(sys.modules, "henry_client.speech.openwakeword", speech_adapters)
+    monkeypatch.setitem(sys.modules, "henry_client.reply.openwakeword", reply_adapters)
     monkeypatch.setitem(
         sys.modules,
-        "henry_client.reply.adapters.mlx_lm",
+        "henry_client.reply.openwakeword.mlx_lm",
         reply_adapter,
     )
     monkeypatch.setattr(app_module, "AudioService", FakeService)

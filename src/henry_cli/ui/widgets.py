@@ -9,7 +9,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Label, LoadingIndicator, Static
 
-from henry_client.events import PipelineStage, PipelineStageStatus
+from henry_speech.events import PipelineStage, PipelineStageStatus
 
 from ..events import TelemetrySnapshot
 from .state import PipelineState

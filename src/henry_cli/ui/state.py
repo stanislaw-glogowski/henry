@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 
-from henry_client.events import (
+from henry_speech.events import (
     AppEvent,
     PipelineStage,
     PipelineStageChanged,

@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "henry-reply": "./src/henry_graphs/studio.py:reply_graph"
+  },
+  "env": ".env"
+}
