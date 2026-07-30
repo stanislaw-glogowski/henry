@@ -21,7 +21,7 @@ class PathLocator:
         return model_path
 
     def ensure_profiles_path(self, *paths: Path | str) -> Path:
-        profiles_path = (self._root_path / self._MODELS_DIR).joinpath(*paths)
+        profiles_path = (self._root_path / self._PROFILES_DIR).joinpath(*paths)
         if not profiles_path.is_dir():
             raise FileNotFoundError(f"Profiles not found: {profiles_path}")
         return profiles_path

@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .paths import PathLocator
+from .storage import PathLocator
 
 
 class ProfileModel(BaseModel):

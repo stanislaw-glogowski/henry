@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from henry_common import paths
-from henry_common.paths import locate_root
+from henry_common import storage
+from henry_common.storage import locate_root
 from henry_common.models import ensure_file_path
 
 
@@ -41,7 +41,7 @@ def test_locate_root_falls_back_to_platform_data_directory(
     fallback = tmp_path / "application-support"
     monkeypatch.delenv("HENRY_HOME", raising=False)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(paths, "user_data_dir", lambda _: str(fallback))
+    monkeypatch.setattr(storage, "user_data_dir", lambda _: str(fallback))
 
     assert locate_root() == fallback
 

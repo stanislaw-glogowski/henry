@@ -3,7 +3,7 @@ import asyncio
 from langgraph_sdk import get_client
 
 from henry_reply.reply import ReplyContext, ReplyGraph
-from henry_common.profiles import load_profiles
+from henry_common.profile import load_profiles
 
 CLIENT_URL = "http://localhost:2024"
 

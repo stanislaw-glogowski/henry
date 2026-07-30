@@ -96,7 +96,10 @@ class CaptureService(AbstractAsyncService):
 
                 if self._wakeword_enabled.is_set():
                     wakeword_score = self._wakeword_model.predict(audio)
-                    wakeword_detected = wakeword_score > self._config.wakeword_threshold
+                    wakeword_detected = (
+                        voice_detected
+                        and wakeword_score > self._config.wakeword_threshold
+                    )
 
                 loop.call_soon_threadsafe(
                     responses.put_nowait,
