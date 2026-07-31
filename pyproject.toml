@@ -5,16 +5,13 @@ description = "Local, privacy-first voice assistant for Apple Silicon Macs"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi[standard]>=0.140.0",
     "huggingface-hub>=1.24.0",
     "langchain-ollama>=1.1.0",
     "langchain>=1.3.14",
     "langgraph-cli[inmem]>=0.4.31",
-    "langgraph-sdk>=0.4.2",
     "langgraph>=1.2.9",
     "loguru>=0.7.3",
     "mlx-audio>=0.4.6",
-    "mlx-lm>=0.31.3",
     "mlx>=0.32.0",
     "numpy>=2.5.1",
     "onnxruntime>=1.28.0,<2",
@@ -26,16 +23,13 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
     "textual>=8.2.8",
-    "uvicorn>=0.51.0",
 ]
 
 [project.scripts]
 henry-cli = "henry_cli.main:main"
-henry-reply = "henry_reply.main:main"
 
 [dependency-groups]
 dev = [
-    "black>=26.5.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
@@ -54,7 +48,8 @@ exclude-dependencies = [
 packages = [
     "src/henry_cli",
     "src/henry_common",
-    "src/henry_reply",
+    "src/henry_conversation",
+    "src/henry_resources",
     "src/henry_speech",
 ]
 
@@ -63,7 +58,8 @@ testpaths = ["tests"]
 addopts = [
     "--cov=henry_cli",
     "--cov=henry_common",
-    "--cov=henry_reply",
+    "--cov=henry_conversation",
+    "--cov=henry_resources",
     "--cov=henry_speech",
     "--cov-branch",
     "--cov-report=term-missing:skip-covered",

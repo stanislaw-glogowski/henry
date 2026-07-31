@@ -25,17 +25,19 @@ class LocalStore(ModelCatalog, ProfileCatalog, SettingsStore):
         return path
 
     def load_profile(self, name: str) -> Profile:
-        path = self._profiles_path / (name + ".yml")
-        if not path.is_file():
+        path = self._profiles_path / name
+        if not path.is_dir():
             raise FileNotFoundError(f"Profile not found: {path}")
-        return Profile.load_from_file(path)
+        return Profile.load_from_directory(path)
 
     def list_profiles(self) -> list[Profile]:
         if not self._profiles_path.is_dir():
             raise FileNotFoundError(f"Profiles not found: {self._profiles_path}")
 
         return [
-            Profile.load_from_file(path) for path in self._profiles_path.glob("*.yml")
+            Profile.load_from_directory(path)
+            for path in sorted(self._profiles_path.iterdir())
+            if path.is_dir()
         ]
 
     def load_settings(self) -> Settings:

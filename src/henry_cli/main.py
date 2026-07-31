@@ -2,27 +2,42 @@ import asyncio
 import signal
 
 from henry_common.events import EventBus, ShutdownEvent
-from henry_reply import run_reply_worker
-from henry_reply.graph import ReplyContext
+from henry_conversation import run_conversation_worker
+from henry_conversation.graph import ConversationContext
 from henry_resources import LocalStore
 from henry_speech import run_speech_worker
 
+from .events import run_event_logger
+from .logger import configure_console_logger
 
-async def main() -> None:
+
+def configure_shutdown(event_bus: EventBus) -> None:
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, event_bus.publish, ShutdownEvent())
+    loop.add_signal_handler(signal.SIGTERM, event_bus.publish, ShutdownEvent())
+
+
+async def run() -> None:
+    configure_console_logger()
     local_store = LocalStore()
     profile = local_store.load_profile("default")
     settings = local_store.load_settings()
+    conversation_context = ConversationContext.from_profile(
+        profile.name,
+        profile.language,
+        profile.conversation,
+    )
 
     with EventBus() as event_bus:
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, event_bus.publish, ShutdownEvent())
-        loop.add_signal_handler(signal.SIGTERM, event_bus.publish, ShutdownEvent())
+        configure_shutdown(event_bus)
 
-        await asyncio.gather(
-            run_reply_worker(event_bus, ReplyContext.from_profile(profile)),
-            run_speech_worker(profile, settings.speech, local_store, event_bus),
-        )
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(run_event_logger(event_bus))
+            tasks.create_task(run_conversation_worker(event_bus, conversation_context))
+            tasks.create_task(
+                run_speech_worker(profile, settings.speech, local_store, event_bus)
+            )
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def main() -> None:
+    asyncio.run(run())

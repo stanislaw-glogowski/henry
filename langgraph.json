@@ -3,7 +3,7 @@
     "."
   ],
   "graphs": {
-    "henry-reply": "./src/henry_graphs/studio.py:reply_graph"
+    "henry-conversation": "./src/henry_conversation/studio.py:conversation_graph"
   },
   "env": ".env"
 }

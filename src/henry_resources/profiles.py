@@ -2,9 +2,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from henry_reply.config import ReplyProfile
+from henry_conversation.config import ConversationProfile
 from henry_speech.config import SpeechProfile
 
 
@@ -15,22 +15,7 @@ class ProfileModel(BaseModel):
     )
 
 
-class WakewordProfile(ProfileModel):
-    model: str = Field(min_length=1)
-
-    @field_validator("model")
-    @classmethod
-    def validate_model_extension(cls, value: str) -> str:
-        if not value.endswith(".onnx"):
-            raise ValueError("wakeword.model must be an ONNX file")
-        return value
-
-
-class VoiceProfile(ProfileModel):
-    model: str = Field(min_length=1)
-
-
-class Profile(ReplyProfile, SpeechProfile):
+class Profile(SpeechProfile):
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -40,18 +25,36 @@ class Profile(ReplyProfile, SpeechProfile):
     path: Path = Field(exclude=True)
     name: str = Field(min_length=1)
     language: str = Field(min_length=1)
+    conversation: ConversationProfile
 
     @staticmethod
-    def load_from_file(path: Path) -> Profile:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    def load_from_directory(path: Path) -> Profile:
+        profile_path = path / "profile.yml"
+        data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        conversation = data.get("conversation", {})
         profile = Profile.model_validate(
             {
                 **data,
-                "id": path.stem,
+                "conversation": {
+                    **conversation,
+                    "prompts": {
+                        "system": Profile._read_prompt(path, "system.md"),
+                        "opening": Profile._read_prompt(path, "opening.md"),
+                        "summary": Profile._read_prompt(path, "summary.md"),
+                    },
+                },
+                "id": path.name,
                 "path": path,
             }
         )
         return profile
+
+    @staticmethod
+    def _read_prompt(profile_path: Path, name: str) -> str:
+        path = profile_path / "prompts" / name
+        if not path.is_file():
+            raise FileNotFoundError(f"Profile prompt not found: {path}")
+        return path.read_text(encoding="utf-8")
 
 
 class ProfileCatalog(ABC):

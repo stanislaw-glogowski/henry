@@ -4,11 +4,12 @@ from typing import Literal
 
 from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
-from henry_reply.events import (
+from henry_conversation.events import (
+    ConversationActivated,
     GenerateReply,
     ReplyCompleted,
     ReplyLine,
-    ReplyStarted,
+    UserTurn,
 )
 
 from .audio import AudioFrame
@@ -113,39 +114,38 @@ class Worker(Component):
             if chunk.is_wakeword:
                 self._set_listening(False)
                 self._inc_pending_ops()
-                self._event_bus.publish(GenerateReply())
+                self._event_bus.publish(GenerateReply(ConversationActivated()))
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(
-            ReplyStarted,
             ReplyLine,
             ReplyCompleted,
             ShutdownEvent,
         ) as events:
             async for event in events:
-                match event:
-                    case ReplyStarted() if event.is_background:
-                        self._inc_pending_ops()
-                    case ReplyLine():
-                        self._inc_pending_ops()
-                        self._synthesis_queue.put_nowait(event.text)
-                    case ReplyCompleted():
-                        self._dec_pending_ops()
-                    case ShutdownEvent():
-                        self._shutdown_event.set()
-                events.task_done()
+                try:
+                    match event:
+                        case ReplyLine():
+                            self._inc_pending_ops()
+                            self._synthesis_queue.put_nowait(event.text)
+                        case ReplyCompleted():
+                            self._dec_pending_ops()
+                        case ShutdownEvent():
+                            self._shutdown_event.set()
+                finally:
+                    events.task_done()
 
     async def _segmentation_loop(self) -> None:
         while not self._shutdown_event.is_set():
             speech_chunk = await self._capture_queue.get()
 
-            detected, speech_segment = self._segmentation_service.feed(speech_chunk)
-            if not detected:
-                continue
-
-            if speech_segment:
-                self._inc_pending_ops()
-                self._segmentation_queue.put_nowait(speech_segment)
+            try:
+                detected, speech_segment = self._segmentation_service.feed(speech_chunk)
+                if detected and speech_segment:
+                    self._inc_pending_ops()
+                    self._segmentation_queue.put_nowait(speech_segment)
+            finally:
+                self._capture_queue.task_done()
 
     async def _transcription_loop(self) -> None:
         while not self._shutdown_event.is_set():
@@ -161,7 +161,9 @@ class Worker(Component):
                             pass
                         case TranscriptionText():
                             self._inc_pending_ops()
-                            self._event_bus.publish(GenerateReply(item.content))
+                            self._event_bus.publish(
+                                GenerateReply(UserTurn(item.content))
+                            )
             finally:
                 self._dec_pending_ops()
                 self._segmentation_queue.task_done()

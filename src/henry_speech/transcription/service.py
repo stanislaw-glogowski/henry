@@ -35,29 +35,30 @@ class TranscriptionService(AbstractAsyncService):
 
         content = ""
 
-        while True:
-            response = await responses.get()
-            try:
-                match response:
-                    case BaseException():
-                        raise response
-                    case None:
-                        break
-                    case TranscriptionChunk():
-                        if response.content:
-                            content += response.content
-                            yield response
-            finally:
-                responses.task_done()
+        try:
+            while True:
+                response = await responses.get()
+                try:
+                    match response:
+                        case BaseException():
+                            raise response
+                        case None:
+                            break
+                        case TranscriptionChunk():
+                            if response.content:
+                                content += response.content
+                                yield response
+                finally:
+                    responses.task_done()
 
-        if content:
-            yield TranscriptionText(
-                content=content,
-            )
-        else:
-            yield None
-
-        await self._cancel_transcribe()
+            if content:
+                yield TranscriptionText(
+                    content=content,
+                )
+            else:
+                yield None
+        finally:
+            await self._cancel_transcribe()
 
     def _run_transcribe(
         self,
@@ -84,7 +85,7 @@ class TranscriptionService(AbstractAsyncService):
             await transcribe_future
         finally:
             self._transcribe_cancel.clear()
-            self.transcribe_future = None
+            self._transcribe_future = None
 
     def _open_resources(self) -> None:
         self._stt_model.open()

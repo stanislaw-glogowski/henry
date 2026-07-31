@@ -32,20 +32,21 @@ class SynthesisService(AbstractAsyncService):
             responses,
         )
 
-        while True:
-            response = await responses.get()
-            try:
-                match response:
-                    case BaseException():
-                        raise response
-                    case None:
-                        break
-                    case AudioFrame():
-                        yield response
-            finally:
-                responses.task_done()
-
-        await self._cancel_synthesize()
+        try:
+            while True:
+                response = await responses.get()
+                try:
+                    match response:
+                        case BaseException():
+                            raise response
+                        case None:
+                            break
+                        case AudioFrame():
+                            yield response
+                finally:
+                    responses.task_done()
+        finally:
+            await self._cancel_synthesize()
 
     def _run_synthesize(
         self,
@@ -74,7 +75,7 @@ class SynthesisService(AbstractAsyncService):
             await synthesize_future
         finally:
             self._synthesize_cancel.clear()
-            self.synthesize_future = None
+            self._synthesize_future = None
 
     def _open_resources(self) -> None:
         self._tts_model.open()

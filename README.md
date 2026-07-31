@@ -7,7 +7,7 @@
 **A local, privacy-first voice assistant built for Apple Silicon Macs.**
 
 Henry keeps wake-word detection, speech recognition, language generation, and speech synthesis on the machine while
-exposing the live pipeline through either a Textual terminal UI or console event logging.
+logging the live pipeline to the console.
 
 The project is intentionally small and explicit: asyncio coordinates the application, dedicated worker threads own
 blocking audio and ML runtimes, and ports keep domain services independent from concrete adapters.
@@ -17,9 +17,9 @@ blocking audio and ML runtimes, and ports keep domain services independent from 
 - Fully local voice pipeline with no cloud inference.
 - Streaming OpenWakeWord detection with Silero VAD.
 - Multilingual Parakeet speech recognition, including Polish.
-- MLX language-model inference optimized for Apple Silicon.
+- Conversation history and summarization with LangGraph and local Ollama.
 - Line-buffered Piper speech synthesis.
-- Textual terminal UI with an optional lightweight event-logging mode.
+- Console logging with one default local profile.
 - Explicit asyncio, worker-thread, port, and adapter boundaries.
 
 ## 🎙️ Voice pipeline
@@ -29,15 +29,15 @@ Microphone (16 kHz)
   -> Silero VAD + OpenWakeWord
   -> utterance segmentation
   -> Parakeet STT
-  -> Qwen / MLX language model
+  -> LangGraph + Ollama
   -> line-buffered reply
   -> Piper TTS (22.05 kHz)
   -> speakers
 ```
 
-Henry begins in wake-word mode. After activation it plays a preloaded spoken acknowledgement and enters utterance mode.
-The current implementation keeps the conversation session active for follow-ups and returns to wake-word mode after a
-configurable number of consecutive empty utterance timeouts. A completed utterance resets that counter.
+Henry begins in wake-word mode. Activation starts a finite LangGraph run that generates a greeting from the conversation
+summary and recent messages. The voice session then remains active for follow-up utterances. Each user turn runs the
+reply and summary nodes and stores its state under the in-process `thread_id="default"`.
 
 ## 📦 Requirements
 
@@ -58,8 +58,9 @@ uv sync
 
 ## 🧠 Model setup
 
-Download the MLX and Piper models before starting Henry. The `hf` CLI is provided by the installed `huggingface-hub`
-dependency, and `uv run hf download` stores models in the same Hugging Face cache that Henry's adapters use at runtime.
+Download the speech and Piper models and make the configured Ollama model available before starting Henry. The `hf` CLI
+is provided by the installed `huggingface-hub` dependency, and `uv run hf download` stores speech models in the same
+Hugging Face cache that Henry's adapters use at runtime.
 
 ### 🗂️ Model inventory
 
@@ -69,25 +70,22 @@ dependency, and `uv run hf download` stores models in the same Hugging Face cach
 | Wake word      | [`alexa_v0.1.onnx`](https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_v0.1.onnx) | Official pre-trained openWakeWord model for "Alexa"; useful for testing            |
 | VAD            | [`mlx-community/silero-vad`](https://huggingface.co/mlx-community/silero-vad)                          | Fixed model used for voice activity detection                                      |
 | STT            | [`mlx-community/parakeet-tdt-0.6b-v3`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)      | Fixed multilingual speech-to-text model, including Polish                          |
-| Language model | [`mlx-community/Qwen3.5-4B-MLX-4bit`](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)        | Smaller and lower-quality model; suitable for diagnostics                          |
-| Language model | [`mlx-community/Qwen3.5-9B-OptiQ-4bit`](https://huggingface.co/mlx-community/Qwen3.5-9B-OptiQ-4bit)    | Recommended default with sufficient response quality                               |
+| Language model | `ollama:gpt-oss:20b`                                                                                 | Default local conversation model                                                    |
 | Voice          | [`rhasspy/piper-voices`](https://huggingface.co/rhasspy/piper-voices/tree/main)                        | Repository containing Piper voices; Henry supports repository-relative model paths |
 
 ### 🤗 Downloading Hugging Face models
 
-Download the VAD, STT, and the language model you want to run:
+Download the VAD and STT models:
 
 ```bash
 uv run hf download mlx-community/silero-vad
 uv run hf download mlx-community/parakeet-tdt-0.6b-v3
-uv run hf download mlx-community/Qwen3.5-4B-MLX-4bit
-uv run hf download mlx-community/Qwen3.5-9B-OptiQ-4bit
 ```
 
 Piper voices consist of an ONNX file and its adjacent `.onnx.json`
 configuration. High quality is recommended; medium quality is a smaller alternative.
 
-| Quality            | `--voice-model` / `HENRY_VOICE_MODEL` value     | Download command                                                                                                                           |
+| Quality            | `tts.model` value in `profile.yml`               | Download command                                                                                                                           |
 |--------------------|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | Medium             | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` | `uv run hf download rhasspy/piper-voices pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx.json` |
 | High (recommended) | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx`       | `uv run hf download rhasspy/piper-voices pl/pl_PL/bass/high/pl_PL-bass-high.onnx pl/pl_PL/bass/high/pl_PL-bass-high.onnx.json`             |
@@ -120,9 +118,8 @@ curl -L https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/alexa_
   -o .henry/models/openwakeword/alexa_v0.1.onnx
 ```
 
-Models created at [openwakeword.com](https://openwakeword.com/) should be copied to the same directory and selected by
-filename with `--wakeword-model` or
-`HENRY_WAKEWORD_MODEL`.
+Models created at [openwakeword.com](https://openwakeword.com/) should be copied to the same directory and selected in
+the default profile.
 
 The data directory is resolved in this order:
 
@@ -132,59 +129,39 @@ The data directory is resolved in this order:
 
 Local `.henry` data and downloaded models are not part of the Python package.
 
+The default profile uses a fixed directory contract:
+
+```text
+.henry/profiles/default/
+├── profile.yml
+└── prompts/
+    ├── system.md
+    ├── opening.md
+    └── summary.md
+```
+
+Prompt paths are not configurable. Persona, conversation opening, and summary behavior belong to these profile files.
+
 ## 🚀 Running Henry
 
-Start the terminal UI:
+Start Henry with the `default` profile and console logging:
 
 ```bash
 uv run henry-cli
 ```
 
-Run without the terminal UI and log application events to the console:
-
-```bash
-uv run henry-cli -noui
-```
-
-`henry-cli` is the only application entrypoint; the former standalone debugger has been folded into this mode. The
-conventional long form `--no-ui` is also supported. Both modes handle `SIGINT` and `SIGTERM`. Press `q` in the terminal
-UI or use `Ctrl+C` to request shutdown.
-
-Profiles configure the assistant name, system prompt style, wake-word model, spoken activation reply, and Piper voice.
-Command-line arguments take precedence over environment variables, which take precedence over the application defaults.
-
-| Command-line argument  | Environment variable       | Default                                   |
-|------------------------|----------------------------|-------------------------------------------|
-| `-noui` / `--no-ui`    | —                          | disabled                                  |
-| `--log-level`          | `HENRY_LOG_LEVEL`          | `DEBUG`                                   |
-| `--profile-kind`       | `HENRY_PROFILE_KIND`       | `default`                                 |
-| `--profile-name`       | `HENRY_PROFILE_NAME`       | `Henry`                                   |
-| `--system-language`    | `HENRY_SYSTEM_LANGUAGE`    | `Polish`                                  |
-| `--wakeword-reply`     | `HENRY_WAKEWORD_REPLY`     | `Tak, Wielmożny Panie...`                 |
-| `--wakeword-model`     | `HENRY_WAKEWORD_MODEL`     | `Hey_Henree_20260406_162745.onnx`         |
-| `--voice-model`        | `HENRY_VOICE_MODEL`        | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx` |
-| `--language-model`     | `HENRY_LANGUAGE_MODEL`     | `mlx-community/Qwen3.5-9B-OptiQ-4bit`     |
-| `--max-empty-segments` | `HENRY_MAX_EMPTY_SEGMENTS` | `3`                                       |
-
-`--max-empty-segments` must be a positive integer. It counts consecutive utterance windows that end without speech; a
-real utterance resets the count.
-
-For example:
-
-```bash
-HENRY_PROFILE_NAME=Ada uv run henry-cli --language-model local/model
-uv run henry-cli -noui --log-level TRACE --wakeword-model alexa_v0.1.onnx
-```
-
-Run `uv run henry-cli --help` for the complete argument reference.
+The CLI intentionally has no arguments. Use `HENRY_HOME` only to select the local data directory. `Ctrl+C` requests a
+clean shutdown.
 
 ## 🏗️ Architecture
 
-| Package         | Responsibility                                                      |
-|-----------------|---------------------------------------------------------------------|
-| `henry_speech`  | Domain models, ports, adapters, services, and orchestration         |
-| `henry_cli_old` | Textual UI, console diagnostics, telemetry state, and buffered logs |
-| `henry_common`  | Resolution of local data and model paths                            |
+| Package              | Responsibility                                                        |
+|----------------------|-----------------------------------------------------------------------|
+| `henry_speech`       | Audio, wake word, segmentation, STT, TTS, playback, voice session    |
+| `henry_conversation` | LangGraph routing, history, summary, model replies, line buffering   |
+| `henry_resources`    | Local profiles, prompts, settings, and model paths                   |
+| `henry_cli`          | Default composition root, signals, and console logging               |
+| `henry_common`       | Shared lifecycle, events, logging, and validation                     |
 
 The event loop runs capture, transcription, processing, and replay tasks. Blocking operations live in long-running
 workers:
@@ -193,7 +170,7 @@ workers:
 - audio output owns the PyAudio output stream;
 - STT owns Parakeet and its MLX runtime;
 - TTS owns Piper;
-- reply owns the MLX language model.
+- conversation calls the local Ollama model through LangChain.
 
 Worker-side requests use `queue.Queue`. Results return to asyncio queues or futures through
 `loop.call_soon_threadsafe(...)`.
@@ -212,10 +189,10 @@ uv run python -m compileall -q src tests
 The tests progress from pure domain behavior to service lifecycle and complete orchestration. Fake ports exercise real
 queues, threads, and asyncio tasks without opening hardware or loading production models.
 
-`pytest` enforces at least 95% combined coverage with branch measurement across the CLI, client, and resource packages.
+`pytest` enforces at least 95% combined coverage with branch measurement across all source packages.
 Concrete adapter modules are excluded from that threshold and remain subject to focused contract tests and manual Apple
-Silicon hardware checks. The suite includes headless Textual tests and fake-driven service tests using real asyncio
-queues, tasks, and worker threads.
+Silicon hardware checks. The suite uses fake-driven graph and service tests with real asyncio queues, tasks, and worker
+threads.
 
 For environments where the default uv cache is read-only, prefix commands with:
 
@@ -247,8 +224,6 @@ are not relicensed under Henry's MIT License.
 | Official pre-trained openWakeWord models, including `alexa_v0.1.onnx`             | [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) — non-commercial use and ShareAlike requirements apply |
 | [Piper voices](https://huggingface.co/rhasspy/piper-voices)                       | MIT                                                                                                                          |
 | [Parakeet TDT 0.6B v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) | CC BY 4.0 — attribution required                                                                                             |
-| [Qwen 3.5 4B MLX](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)       | Apache 2.0                                                                                                                   |
-| [Qwen 3.5 9B OptiQ](https://huggingface.co/mlx-community/Qwen3.5-9B-OptiQ-4bit)   | Apache 2.0                                                                                                                   |
 
 Custom wake-word models and alternative model variants may use different licenses. Check the relevant model card or
 download source before redistribution or commercial use.

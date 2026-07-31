@@ -1,14 +1,12 @@
-from henry_common.events import EventBus
-from henry_resources.models import ModelCatalog
+from __future__ import annotations
 
-from .audio import get_audio_driver
-from .capture import CaptureService, get_vad_model, get_wakeword_model
-from .config import SpeechProfile, SpeechSettings
-from .playback import PlaybackService
-from .segmentation import SegmentationService
-from .synthesis import SynthesisService, get_tts_model
-from .transcription import TranscriptionService, get_stt_model
-from .worker import Worker
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from henry_common.events import EventBus
+    from henry_resources.models import ModelCatalog
+
+    from .config import SpeechProfile, SpeechSettings
 
 __all__ = ["run_speech_worker"]
 
@@ -19,6 +17,13 @@ async def run_speech_worker(
     model_catalog: ModelCatalog,
     event_bus: EventBus,
 ) -> None:
+    from .audio import get_audio_driver
+    from .capture import CaptureService, get_vad_model, get_wakeword_model
+    from .playback import PlaybackService
+    from .segmentation import SegmentationService
+    from .synthesis import SynthesisService, get_tts_model
+    from .transcription import TranscriptionService, get_stt_model
+    from .worker import Worker
 
     with get_audio_driver(settings.audio) as audio_driver:
         audio_input = audio_driver.get_input()

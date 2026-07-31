@@ -1,4 +1,3 @@
-from .adapters import get_audio_driver
 from .config import AudioSettings
 from .domain import (
     AudioBuffer,
@@ -11,6 +10,13 @@ from .ports import (
     AudioInput,
     AudioOutput,
 )
+
+
+def get_audio_driver(settings: AudioSettings) -> AudioDriver:
+    from .adapters import get_audio_driver as create_audio_driver
+
+    return create_audio_driver(settings)
+
 
 __all__ = [
     "AudioBuffer",

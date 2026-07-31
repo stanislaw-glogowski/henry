@@ -94,9 +94,9 @@ class CaptureService(AbstractAsyncService):
                         wakeword=wakeword,
                     ),
                 )
-            responses.put_nowait(None)
+            loop.call_soon_threadsafe(responses.put_nowait, None)
         except BaseException as err:
-            responses.put_nowait(err)
+            loop.call_soon_threadsafe(responses.put_nowait, err)
 
     async def _cancel_capture_loop(self) -> None:
         if self._capture_future is None:
