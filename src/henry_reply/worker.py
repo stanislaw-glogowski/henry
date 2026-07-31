@@ -1,20 +1,35 @@
 import asyncio
 
-from mlx_audio.tts.models.moss_tts.processor import UserMessage
+from langchain.messages import AIMessageChunk, HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
 
-from .events import GenerateReply, ReplyCompleted, ReplyLine, ReplyStarted
-from .graph import ReplyGraph
+from .events import (
+    GenerateReply,
+    ReplyChunk,
+    ReplyCompleted,
+    ReplyLine,
+    ReplyStarted,
+)
+from .graph import ReplyContext, ReplyGraph, ReplyNode
 
 
 class Worker(Component):
-    def __init__(self, event_bus: EventBus, graph: ReplyGraph) -> None:
+    THREAD_ID = "default"
+
+    def __init__(
+        self,
+        event_bus: EventBus,
+        graph: ReplyGraph,
+        context: ReplyContext,
+    ) -> None:
         super().__init__()
         self._event_bus = event_bus
 
         self._graph = graph
+        self._context = context
         self._graph_queue: asyncio.Queue[str] = asyncio.Queue()
 
         self._shutdown_event = asyncio.Event()
@@ -63,15 +78,38 @@ class Worker(Component):
             text = await self._graph_queue.get()
 
             try:
-                async for chunk in self._graph.compiled.astream_events(
-                    input=UserMessage(text)
-                ):
-                    self._logger.debug(chunk)
+                self._event_bus.publish(ReplyStarted())
 
-                self._event_bus.publish(
-                    ReplyStarted(),
-                    ReplyLine(text="Dzień dobry!"),
-                    ReplyCompleted(),
-                )
+                config: RunnableConfig = {
+                    "configurable": {"thread_id": self.THREAD_ID},
+                }
+
+                line_buffer = ""
+                async for message, metadata in self._graph.compiled.astream(
+                    input={"messages": [HumanMessage(content=text)]},
+                    config=config,
+                    context=self._context,
+                    stream_mode="messages",
+                ):
+                    if metadata.get("langgraph_node") != ReplyNode.NAME:
+                        continue
+                    if not isinstance(message, AIMessageChunk):
+                        continue
+
+                    chunk = message.text
+                    if not chunk:
+                        continue
+
+                    self._event_bus.publish(ReplyChunk(text=chunk))
+                    line_buffer += chunk
+
+                    while "\n" in line_buffer:
+                        line, line_buffer = line_buffer.split("\n", maxsplit=1)
+                        if line:
+                            self._event_bus.publish(ReplyLine(text=line))
+
+                if line_buffer:
+                    self._event_bus.publish(ReplyLine(text=line_buffer))
             finally:
+                self._event_bus.publish(ReplyCompleted())
                 self._graph_queue.task_done()
