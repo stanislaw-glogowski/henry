@@ -2,19 +2,19 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 
-from henry_common import AbstractAsyncService
+from henry_common.components import AbstractAsyncService
 
 from ..audio import AudioFrame
-from .ports import SynthesisModel
+from .ports import TTSModel
 
 
 class SynthesisService(AbstractAsyncService):
     def __init__(
         self,
-        model: SynthesisModel,
+        tts_model: TTSModel,
     ):
         super().__init__()
-        self._model = model
+        self._tts_model = tts_model
         self._synthesize_cancel = threading.Event()
         self._synthesize_future: asyncio.Future[None] | None = None
 
@@ -54,7 +54,7 @@ class SynthesisService(AbstractAsyncService):
         responses: asyncio.Queue[AudioFrame | BaseException | None],
     ) -> None:
         try:
-            frames = self._model.synthesize(text)
+            frames = self._tts_model.synthesize(text)
 
             for frame in frames:
                 if self._synthesize_cancel.is_set():
@@ -77,10 +77,10 @@ class SynthesisService(AbstractAsyncService):
             self.synthesize_future = None
 
     def _open_resources(self) -> None:
-        self._model.open()
+        self._tts_model.open()
 
     def _close_resources(self) -> None:
-        self._model.close()
+        self._tts_model.close()
 
     async def _post_stop(self) -> None:
         await self._cancel_synthesize()

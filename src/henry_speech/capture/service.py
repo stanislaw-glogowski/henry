@@ -2,31 +2,22 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from contextlib import ExitStack
-from dataclasses import dataclass
 
-from henry_common import AbstractAsyncService
+from henry_common.components import AbstractAsyncService
 
 from ..audio import AudioInput
-from .domain import SpeechChunk
+from .domain import DetectionResult, SpeechChunk
 from .ports import VADModel, WakeWordModel
-
-
-@dataclass
-class CaptureConfig:
-    vad_threshold: float = 0.5
-    wakeword_threshold: float = 0.75
 
 
 class CaptureService(AbstractAsyncService):
     def __init__(
         self,
-        config: CaptureConfig,
         audio_input: AudioInput,
         vad_model: VADModel,
         wakeword_model: WakeWordModel,
     ):
         super().__init__()
-        self._config = config
         self._audio_input = audio_input
         self._vad_model = vad_model
         self._wakeword_enabled = threading.Event()
@@ -89,26 +80,18 @@ class CaptureService(AbstractAsyncService):
                     self._wakeword_model.reset()
                     self._wakeword_reset.clear()
 
-                voice_score = self._vad_model.predict(audio)
-                voice_detected = voice_score > self._config.vad_threshold
-                wakeword_score: float | None = None
-                wakeword_detected: bool | None = None
+                vad = self._vad_model.detect(audio)
+                wakeword: DetectionResult | None = None
 
                 if self._wakeword_enabled.is_set():
-                    wakeword_score = self._wakeword_model.predict(audio)
-                    wakeword_detected = (
-                        voice_detected
-                        and wakeword_score > self._config.wakeword_threshold
-                    )
+                    wakeword = self._wakeword_model.detect(audio)
 
                 loop.call_soon_threadsafe(
                     responses.put_nowait,
                     SpeechChunk(
                         audio=audio,
-                        voice_detected=voice_detected,
-                        voice_score=voice_score,
-                        wakeword_score=wakeword_score,
-                        wakeword_detected=wakeword_detected,
+                        vad=vad,
+                        wakeword=wakeword,
                     ),
                 )
             responses.put_nowait(None)

@@ -51,7 +51,7 @@ def test_orchestrator_validates_timing_and_empty_segment_limit() -> None:
     dependencies = {
         "audio": FakeAudioService(),
         "speech": FakeSpeechService(),
-        "reply": FakeReplyService(),
+        "graph": FakeReplyService(),
         "events": RecordingEventSink(),
     }
 

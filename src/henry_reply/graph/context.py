@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from langgraph.runtime import Runtime
 
-from henry_common import Profile
+from henry_resources.profiles import Profile
 
 type ReplyRuntime = Runtime[ReplyContext]
 

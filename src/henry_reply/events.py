@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 
-from henry_common import Event
+from henry_common.events import Event
 
 
 @dataclass(frozen=True, slots=True)
 class GenerateReply(Event):
-    text: str | None
+    text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

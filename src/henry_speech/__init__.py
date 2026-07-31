@@ -1,78 +1,62 @@
-from henry_common import EventBus, PathLocator, Profile
-from henry_speech.audio import AudioDriver
-from henry_speech.capture import CaptureConfig, CaptureService, VADModel, WakeWordModel
-from henry_speech.playback import PlaybackService
-from henry_speech.segmentation import SegmentationConfig, SegmentationService
-from henry_speech.synthesis import SynthesisModel, SynthesisService
-from henry_speech.transcription import TranscriptionModel, TranscriptionService
-from henry_speech.worker import SpeechWorker
+from henry_common.events import EventBus
+from henry_resources.models import ModelCatalog
 
+from .audio import get_audio_driver
+from .capture import CaptureService, get_vad_model, get_wakeword_model
+from .config import SpeechProfile, SpeechSettings
+from .playback import PlaybackService
+from .segmentation import SegmentationService
+from .synthesis import SynthesisService, get_tts_model
+from .transcription import TranscriptionService, get_stt_model
+from .worker import Worker
 
-def _get_audio_driver() -> AudioDriver:
-    from henry_speech.audio.adapters.pyaudio import PyAudioDriver
-
-    return PyAudioDriver()
-
-
-def _get_vad_model(locator: PathLocator) -> VADModel:
-    from henry_speech.capture.adapters.mlx_audio import SileroVADModel
-
-    return SileroVADModel()
-
-
-def _get_wakeword_model(locator: PathLocator, model_path: str) -> WakeWordModel:
-    from henry_speech.capture.adapters.openwakeword import OpenWakeWordModel
-
-    return OpenWakeWordModel(locator, model_path)
-
-
-def _get_synthesis_model(model_path: str) -> SynthesisModel:
-    from henry_speech.synthesis.adapters.piper import PiperModel
-
-    return PiperModel(model_path)
-
-
-def _get_transcription_model() -> TranscriptionModel:
-    from henry_speech.transcription.adapters.mlx_audio import ParakeetTDTModel
-
-    return ParakeetTDTModel()
+__all__ = ["run_speech_worker"]
 
 
 async def run_speech_worker(
-    locator: PathLocator,
-    profile: Profile,
+    profile: SpeechProfile,
+    settings: SpeechSettings,
+    model_catalog: ModelCatalog,
     event_bus: EventBus,
 ) -> None:
 
-    with _get_audio_driver() as audio_driver:
+    with get_audio_driver(settings.audio) as audio_driver:
         audio_input = audio_driver.get_input()
         audio_output = audio_driver.get_output()
-
-        await SpeechWorker(
+        vad_model = get_vad_model(
+            model_catalog,
+            settings.vad,
+        )
+        wakeword_model = get_wakeword_model(
+            model_catalog,
+            profile.wakeword,
+            settings.wakeword,
+        )
+        tts_model = get_tts_model(
+            profile.tts,
+            settings.tts,
+        )
+        stt_model = get_stt_model(
+            profile.stt,
+            settings.stt,
+        )
+        await Worker(
             event_bus=event_bus,
             capture_service=CaptureService(
-                config=CaptureConfig(),
                 audio_input=audio_input,
-                vad_model=_get_vad_model(
-                    locator=locator,
-                ),
-                wakeword_model=_get_wakeword_model(
-                    locator=locator,
-                    model_path=profile.wakeword.model,
-                ),
+                vad_model=vad_model,
+                wakeword_model=wakeword_model,
             ),
             playback_service=PlaybackService(
                 audio_output=audio_output,
             ),
             segmentation_service=SegmentationService(
-                config=SegmentationConfig(),
+                settings=settings.segmentation,
             ),
             synthesis_service=SynthesisService(
-                model=_get_synthesis_model(
-                    model_path=profile.voice.model,
-                ),
+                tts_model=tts_model,
             ),
             transcription_service=TranscriptionService(
-                model=_get_transcription_model(),
+                stt_model=stt_model,
             ),
         ).run()

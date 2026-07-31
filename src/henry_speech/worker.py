@@ -1,8 +1,9 @@
 import asyncio
+from dataclasses import dataclass
 from typing import Literal
 
-from henry_common import EventBus, bind_logger
-from henry_common.events import ShutdownEvent
+from henry_common.components import Component
+from henry_common.events import EventBus, ShutdownEvent
 from henry_reply.events import (
     GenerateReply,
     ReplyCompleted,
@@ -12,16 +13,19 @@ from henry_reply.events import (
 
 from .audio import AudioFrame
 from .capture import CaptureService, SpeechChunk
-from .events import SpeechChunkCaptured
+from .events import SpeechChunkCaptured, VADObserved, WakeWordObserved
 from .playback import PlaybackService
 from .segmentation import SegmentationService, SpeechSegment
 from .synthesis import SynthesisService
 from .transcription import TranscriptionChunk, TranscriptionService, TranscriptionText
 
-type _Mode = Literal["wakeword", "utterance", "paused", "unknown"]
+
+@dataclass(frozen=True, slots=True)
+class WorkerOptions:
+    wakeword_disabled: bool = False
 
 
-class SpeechWorker:
+class Worker(Component):
     def __init__(
         self,
         event_bus: EventBus,
@@ -30,7 +34,11 @@ class SpeechWorker:
         transcription_service: TranscriptionService,
         synthesis_service: SynthesisService,
         playback_service: PlaybackService,
+        options: WorkerOptions | None = None,
     ) -> None:
+        super().__init__()
+        self._options = options if options is not None else WorkerOptions()
+
         self._event_bus = event_bus
 
         self._capture_queue: asyncio.Queue[SpeechChunk] = asyncio.Queue()
@@ -41,19 +49,18 @@ class SpeechWorker:
 
         self._transcription_service = transcription_service
 
-        self._synthesis_queue: asyncio.Queue[str] = asyncio.Queue()
         self._synthesis_service = synthesis_service
+        self._synthesis_queue: asyncio.Queue[str] = asyncio.Queue()
 
-        self._playback_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
         self._playback_service = playback_service
-
-        self._is_listening = False
-        self._is_recording = False
-        self._pending_ops = 0
+        self._playback_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
 
         self._shutdown_event = asyncio.Event()
 
-        self._logger = bind_logger(self)
+        self._recording = False
+        self._listening = False
+        self._pending_ops = 0
+
         self._logger.debug("INITIALIZED")
 
     async def run(self) -> None:
@@ -65,13 +72,13 @@ class SpeechWorker:
         ):
             self._logger.debug("Starting tasks")
 
-            self._set_listening(True)
             self._set_recording(True)
+            self._set_listening(not self._options.wakeword_disabled)
 
             async with asyncio.TaskGroup() as group:
                 tasks = [
-                    group.create_task(self._events_loop()),
                     group.create_task(self._capture_loop()),
+                    group.create_task(self._events_loop()),
                     group.create_task(self._segmentation_loop()),
                     group.create_task(self._transcription_loop()),
                     group.create_task(self._synthesis_loop()),
@@ -84,6 +91,29 @@ class SpeechWorker:
 
                 for task in tasks:
                     task.cancel()
+
+    async def _capture_loop(self) -> None:
+        async for chunk in self._capture_service.capture():
+            if self._shutdown_event.is_set():
+                return
+
+            self._event_bus.publish(
+                SpeechChunkCaptured.from_chunk(chunk),
+                VADObserved.from_chunk(chunk),
+                WakeWordObserved.from_chunk(chunk),
+            )
+
+            if not self._recording:
+                continue
+
+            if not self._listening:
+                self._capture_queue.put_nowait(chunk)
+                continue
+
+            if chunk.is_wakeword:
+                self._set_listening(False)
+                self._inc_pending_ops()
+                self._event_bus.publish(GenerateReply())
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(
@@ -103,26 +133,7 @@ class SpeechWorker:
                         self._dec_pending_ops()
                     case ShutdownEvent():
                         self._shutdown_event.set()
-
-    async def _capture_loop(self) -> None:
-        async for chunk in self._capture_service.capture():
-            if self._shutdown_event.is_set():
-                return
-
-            self._event_bus.publish(
-                SpeechChunkCaptured.from_chunk(chunk),
-            )
-
-            if not self._is_recording:
-                continue
-
-            if not self._is_listening:
-                self._capture_queue.put_nowait(chunk)
-                continue
-
-            if chunk.wakeword_detected:
-                self._set_listening(False)
-                self._publish_reply_request()
+                events.task_done()
 
     async def _segmentation_loop(self) -> None:
         while not self._shutdown_event.is_set():
@@ -149,7 +160,8 @@ class SpeechWorker:
                         case TranscriptionChunk():
                             pass
                         case TranscriptionText():
-                            self._publish_reply_request(item.content)
+                            self._inc_pending_ops()
+                            self._event_bus.publish(GenerateReply(item.content))
             finally:
                 self._dec_pending_ops()
                 self._segmentation_queue.task_done()
@@ -177,7 +189,7 @@ class SpeechWorker:
                 self._playback_queue.task_done()
 
     def _set_listening(self, enabled: bool) -> None:
-        self._is_listening = enabled
+        self._listening = enabled
         if enabled:
             self._logger.debug("Listening ENABLED")
             self._capture_service.enable_wakeword()
@@ -186,7 +198,7 @@ class SpeechWorker:
             self._capture_service.disable_wakeword()
 
     def _set_recording(self, enabled: bool) -> None:
-        self._is_recording = enabled
+        self._recording = enabled
         if enabled:
             self._logger.debug("Recording ENABLED")
         else:
@@ -199,12 +211,8 @@ class SpeechWorker:
     def _dec_pending_ops(self) -> None:
         self._update_pending_ops(-1)
 
-    def _update_pending_ops(self, delta: Literal[1, -1] = 1) -> None:
+    def _update_pending_ops(self, delta: Literal[1, -1]) -> None:
         self._pending_ops += delta
-        is_recording = self._pending_ops == 0
-        if is_recording != self._is_recording:
-            self._set_recording(is_recording)
-
-    def _publish_reply_request(self, text: str | None = None) -> None:
-        self._inc_pending_ops()
-        self._event_bus.publish(GenerateReply(text))
+        recording = self._pending_ops == 0
+        if recording != self._recording:
+            self._set_recording(recording)

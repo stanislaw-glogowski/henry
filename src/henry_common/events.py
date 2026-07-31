@@ -12,6 +12,9 @@ from typing import Self
 class Event: ...
 
 
+class ActionEvent(Event): ...
+
+
 class StateEvent(Event): ...
 
 
@@ -58,12 +61,14 @@ class EventSubscription(
             raise StopAsyncIteration
 
         event = await self._queue.get()
-
         if event is None:
             self._closed = True
             raise StopAsyncIteration
 
         return event
+
+    def task_done(self) -> None:
+        self._queue.task_done()
 
     def close(self) -> None:
         if self._closed:
@@ -91,9 +96,11 @@ class EventBus(AbstractContextManager):
     ) -> None:
         self.close()
 
-    def publish(self, *events: Event) -> None:
+    def publish(self, *events: Event | None) -> None:
         for queue, event_types in self._subscriptions.items():
             for event in events:
+                if event is None:
+                    continue
                 if not event_types or isinstance(event, event_types):
                     queue.put_nowait(event)
 

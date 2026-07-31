@@ -2,30 +2,35 @@ import numpy as np
 from numpy.typing import NDArray
 from openwakeword import Model
 
-from henry_common import PathLocator
+from henry_resources.models import ModelCatalog
 
 from ....audio import AudioFrame
+from ...config import WakeWordProfile
+from ...domain import DetectionResult
 from ...ports import WakeWordModel
-from .common import MODELS_PATH
+from .model import BaseModel
 
 
-class OpenWakeWordModel(WakeWordModel):
+class OpenWakeWordModel(WakeWordModel, BaseModel):
     _MELSPEC_PATH = "melspectrogram.onnx"
     _EMBEDDING_PATH = "embedding_model.onnx"
     _NUM_CPU = 1
     _FRAME_SIZE = 1280
 
-    def __init__(self, locator: PathLocator, model_path: str) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        catalog: ModelCatalog,
+        profile: WakeWordProfile,
+    ) -> None:
+        super().__init__(catalog)
+        self._profile = profile
         self._model: Model | None = None
-        self._model_path = locator.ensure_model_path(MODELS_PATH, model_path)
-        self._melspec_path = locator.ensure_model_path(MODELS_PATH, self._MELSPEC_PATH)
-        self._embedding_path = locator.ensure_model_path(
-            MODELS_PATH, self._EMBEDDING_PATH
-        )
+        self._model_path = self._ensure_model_path(profile.model)
+        self._melspec_path = self._ensure_model_path(self._MELSPEC_PATH)
+        self._embedding_path = self._ensure_model_path(self._EMBEDDING_PATH)
         self._samples_buffer = np.empty(0, dtype=np.float32)
 
-    def predict(self, frame: AudioFrame) -> float:
+    def detect(self, frame: AudioFrame) -> DetectionResult:
         if self._model is None:
             raise RuntimeError("Model is not loaded")
 
@@ -45,7 +50,7 @@ class OpenWakeWordModel(WakeWordModel):
 
         if complete_samples == 0:
             self._samples_buffer = samples
-            return 0.0
+            return DetectionResult()
 
         self._samples_buffer = samples[complete_samples:].copy()
 
@@ -79,7 +84,10 @@ class OpenWakeWordModel(WakeWordModel):
             for score in scores.values():
                 highest_score = max(highest_score, float(score))
 
-        return highest_score
+        return DetectionResult(
+            score=highest_score,
+            detected=highest_score > self._profile.threshold,
+        )
 
     def reset(self) -> None:
         self._samples_buffer = np.empty(0, dtype=np.float32)

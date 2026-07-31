@@ -1,8 +1,9 @@
+from .config import SegmentationSettings
 from .domain import SpeechSegment
-from .service import SegmentationConfig, SegmentationService
+from .service import SegmentationService
 
 __all__ = [
-    "SegmentationConfig",
     "SegmentationService",
+    "SegmentationSettings",
     "SpeechSegment",
 ]

@@ -45,7 +45,7 @@ class ReplyService(AbstractAsyncContextManager):
         await self._stop()
 
     async def reply(self, request: ReplyRequest) -> AsyncIterator[Reply]:
-        """Stream raw chunks, complete lines, and the accumulated reply text."""
+        """Stream raw chunks, complete lines, and the accumulated graph text."""
         if self._replying.is_set():
             return
 

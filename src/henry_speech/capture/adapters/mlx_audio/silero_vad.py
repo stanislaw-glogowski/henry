@@ -4,18 +4,24 @@ from mlx_audio.vad.models.silero_vad import Model
 from mlx_audio.vad.models.silero_vad import SileroVADState as ModelState
 
 from ....audio import AudioFrame
+from ...config import VADSettings
+from ...domain import DetectionResult
 from ...ports import VADModel
 
 
 class SileroVADModel(VADModel):
     _MODEL_ID = "mlx-community/silero-vad"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        settings: VADSettings | None = None,
+    ) -> None:
         super().__init__("MLX")
+        self._settings = settings if settings is not None else VADSettings()
         self._model: Model | None = None
         self._state: ModelState | None = None
 
-    def predict(self, frame: AudioFrame) -> float:
+    def detect(self, frame: AudioFrame) -> DetectionResult:
         if self._model is None:
             raise RuntimeError("Model is not loaded")
 
@@ -25,7 +31,11 @@ class SileroVADModel(VADModel):
             sample_rate=frame.format.sample_rate,
         )
 
-        return float(probability.item())
+        score = float(probability.item())
+        return DetectionResult(
+            score=score,
+            detected=score > self._settings.threshold,
+        )
 
     def open(self) -> None:
         if self._model is not None:

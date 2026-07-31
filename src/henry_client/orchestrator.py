@@ -23,13 +23,13 @@ class ListeningMode(Enum):
 
 @dataclass(frozen=True, slots=True)
 class _PlaybackEnd:
-    """Mark a reply boundary and its post-playback listening delay."""
+    """Mark a graph boundary and its post-playback listening delay."""
 
     delay: float = 0.0
 
 
 class Orchestrator:
-    """Coordinate listening modes and the audio, speech, and reply pipeline."""
+    """Coordinate listening modes and the audio, speech, and graph pipeline."""
 
     def __init__(
         self,
@@ -260,7 +260,7 @@ class Orchestrator:
                             )
                         case ReplyText():
                             self._logger.trace(
-                                "Generated reply: content='{}'",
+                                "Generated graph: content='{}'",
                                 reply.content,
                             )
 

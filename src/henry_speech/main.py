@@ -1,27 +1,15 @@
 import asyncio
 import signal
 
-from loguru import logger
-
-from henry_common import EventBus, PathLocator, load_profile
-from henry_common.events import ShutdownEvent
+from henry_common.events import EventBus, ShutdownEvent
 from henry_reply.events import (
     GenerateReply,
     ReplyCompleted,
     ReplyLine,
     ReplyStarted,
 )
+from henry_resources import LocalStore
 from henry_speech import run_speech_worker
-from henry_speech.audio.adapters.pyaudio import PyAudioDriver
-from henry_speech.capture import CaptureConfig, CaptureService
-from henry_speech.capture.adapters.mlx_audio import SileroVADModel
-from henry_speech.capture.adapters.openwakeword import OpenWakeWordModel
-from henry_speech.playback import PlaybackService
-from henry_speech.segmentation import SegmentationConfig, SegmentationService
-from henry_speech.synthesis import SynthesisService
-from henry_speech.synthesis.adapters.piper import PiperModel
-from henry_speech.transcription import TranscriptionService
-from henry_speech.transcription.adapters.mlx_audio import ParakeetTDTModel
 
 
 def configure_shutdown() -> asyncio.Event:
@@ -38,9 +26,10 @@ def configure_shutdown() -> asyncio.Event:
 
 
 async def main() -> None:
-    locator = PathLocator()
+    local_store = LocalStore()
     shutdown = configure_shutdown()
-    profile = load_profile(locator, "default")
+    profile = local_store.load_profile("default")
+    settings = local_store.load_settings()
 
     with EventBus() as event_bus:
 
@@ -65,7 +54,9 @@ async def main() -> None:
 
         async with asyncio.TaskGroup() as tasks:
             a = tasks.create_task(run_events())
-            b = tasks.create_task(run_speech_worker(locator, profile, event_bus))
+            b = tasks.create_task(
+                run_speech_worker(profile, settings.speech, local_store, event_bus)
+            )
 
             await shutdown.wait()
 

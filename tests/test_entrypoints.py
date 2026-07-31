@@ -221,6 +221,6 @@ def test_module_entrypoint_calls_main(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(cli, "main", lambda: calls.append(True))
 
-    runpy.run_module("henry_cli.__main__", run_name="__main__")
+    runpy.run_module("henry_cli_old.__main__", run_name="__main__")
 
     assert calls == [True]

@@ -1,21 +1,21 @@
 from abc import ABC, abstractmethod
 
-from henry_common import AbstractResource
+from henry_common.components import AbstractResource
 
 from ..audio import AudioFrame
+from .domain import DetectionResult
 
 
-class VADModel(AbstractResource, ABC):
+class DetectionModel(AbstractResource, ABC):
     @abstractmethod
-    def predict(self, frame: AudioFrame) -> float:
+    def detect(self, frame: AudioFrame) -> DetectionResult:
         raise NotImplementedError
 
 
-class WakeWordModel(AbstractResource, ABC):
-    @abstractmethod
-    def predict(self, frame: AudioFrame) -> float:
-        raise NotImplementedError
+class VADModel(DetectionModel, ABC): ...
 
+
+class WakeWordModel(DetectionModel, ABC):
     @abstractmethod
     def reset(self) -> None:
         raise NotImplementedError

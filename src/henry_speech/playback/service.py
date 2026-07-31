@@ -1,4 +1,4 @@
-from henry_common import AbstractAsyncService
+from henry_common.components import AbstractAsyncService
 
 from ..audio import AudioFrame, AudioOutput
 

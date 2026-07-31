@@ -4,7 +4,7 @@ import pytest
 
 from henry_common import storage
 from henry_common.storage import locate_root
-from henry_common.models import ensure_file_path
+from henry_common.model import ensure_file_path
 
 
 def test_locate_root_prefers_environment(monkeypatch, tmp_path: Path) -> None:

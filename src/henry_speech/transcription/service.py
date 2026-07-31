@@ -2,20 +2,20 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 
-from henry_common import AbstractAsyncService
+from henry_common.components import AbstractAsyncService
 
 from ..audio import AudioFrame
 from .domain import Transcription, TranscriptionChunk, TranscriptionText
-from .ports import TranscriptionModel
+from .ports import STTModel
 
 
 class TranscriptionService(AbstractAsyncService):
     def __init__(
         self,
-        model: TranscriptionModel,
+        stt_model: STTModel,
     ):
         super().__init__()
-        self._model = model
+        self._stt_model = stt_model
         self._transcribe_cancel = threading.Event()
         self._transcribe_future: asyncio.Future[None] | None = None
 
@@ -66,7 +66,7 @@ class TranscriptionService(AbstractAsyncService):
         responses: asyncio.Queue[TranscriptionChunk | BaseException | None],
     ) -> None:
         try:
-            for chunk in self._model.transcribe(frame):
+            for chunk in self._stt_model.transcribe(frame):
                 if self._transcribe_cancel.is_set():
                     break
                 loop.call_soon_threadsafe(responses.put_nowait, chunk)
@@ -87,10 +87,10 @@ class TranscriptionService(AbstractAsyncService):
             self.transcribe_future = None
 
     def _open_resources(self) -> None:
-        self._model.open()
+        self._stt_model.open()
 
     def _close_resources(self) -> None:
-        self._model.close()
+        self._stt_model.close()
 
     async def _post_stop(self) -> None:
         await self._cancel_transcribe()

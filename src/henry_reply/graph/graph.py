@@ -1,3 +1,5 @@
+from typing import Any
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
@@ -25,5 +27,5 @@ class ReplyGraph:
         self._compiled = builder.compile(checkpointer=checkpointer)
 
     @property
-    def compiled(self) -> CompiledStateGraph:
+    def compiled(self) -> CompiledStateGraph[StateGraph, ReplyContext, Any, Any]:
         return self._compiled

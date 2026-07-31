@@ -32,7 +32,7 @@ Use `uv sync` after dependency or lockfile changes.
 - `henry_client.speech` owns utterance segmentation, STT, and TTS.
 - `henry_client.reply` owns language-model response generation and reply segmentation.
 - `Orchestrator` owns product flow and listening-mode transitions.
-- `henry_cli` owns Textual UI state, console diagnostics, and telemetry presentation, not domain decisions. Do not
+- `henry_cli_old` owns Textual UI state, console diagnostics, and telemetry presentation, not domain decisions. Do not
   restore a separate debugger entrypoint.
 - `henry_common` resolves local files; it must not assume the process cwd.
 
@@ -56,8 +56,8 @@ await asyncio tasks before service contexts join their workers.
   `asyncio.wait_for(...)`; do not use arbitrary sleeps.
 - Cover both normal lifecycle and startup/runtime error propagation.
 - Treat a manual device smoke test as separate evidence from automated tests.
-- `uv run pytest -q` enforces at least 95% combined coverage with branch measurement for `henry_cli`, `henry_speech`,
-  and
+- `uv run pytest -q` enforces at least 95% combined coverage with branch measurement for `henry_cli_old`,
+  `henry_speech`, and
   `henry_common`.
 - Concrete modules below `*/adapters/*` are excluded from the coverage threshold, but focused adapter contract tests may
   still run.

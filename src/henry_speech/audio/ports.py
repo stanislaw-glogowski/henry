@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from henry_common import AbstractResource
+from henry_common.components import AbstractResource
 
 from .domain import AudioFrame
 

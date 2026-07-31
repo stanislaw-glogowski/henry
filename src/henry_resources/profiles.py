@@ -1,9 +1,11 @@
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .storage import PathLocator
+from henry_reply.config import ReplyProfile
+from henry_speech.config import SpeechProfile
 
 
 class ProfileModel(BaseModel):
@@ -28,37 +30,37 @@ class VoiceProfile(ProfileModel):
     model: str = Field(min_length=1)
 
 
-class ReplyProfile(ProfileModel):
-    system_prompt: str = Field(min_length=1)
-    model: str = Field(min_length=1)
+class Profile(ReplyProfile, SpeechProfile):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
 
-
-class Profile(ProfileModel):
+    id: str = Field(exclude=True)
     path: Path = Field(exclude=True)
     name: str = Field(min_length=1)
     language: str = Field(min_length=1)
-    wakeword: WakewordProfile
-    voice: VoiceProfile
-    reply: ReplyProfile
 
     @staticmethod
-    def load(path: Path) -> Profile:
+    def load_from_file(path: Path) -> Profile:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         profile = Profile.model_validate(
             {
                 **data,
+                "id": path.stem,
                 "path": path,
             }
         )
         return profile
 
 
-def load_profile(locator: PathLocator, name: str) -> Profile:
-    path = locator.ensure_profiles_path() / (name + ".yml")
-    return Profile.load(path)
+class ProfileCatalog(ABC):
+    _PROFILES_PATH = "profiles"
 
+    @abstractmethod
+    def load_profile(self, name: str) -> Profile:
+        raise NotImplementedError
 
-def load_profiles(locator: PathLocator) -> dict[str, Profile]:
-    profiles_path = locator.ensure_profiles_path()
-
-    return {path.stem: Profile.load(path) for path in profiles_path.glob("*.yml")}
+    @abstractmethod
+    def list_profiles(self) -> list[Profile]:
+        raise NotImplementedError

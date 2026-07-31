@@ -180,11 +180,11 @@ Run `uv run henry-cli --help` for the complete argument reference.
 
 ## 🏗️ Architecture
 
-| Package        | Responsibility                                                      |
-|----------------|---------------------------------------------------------------------|
-| `henry_speech` | Domain models, ports, adapters, services, and orchestration         |
-| `henry_cli`    | Textual UI, console diagnostics, telemetry state, and buffered logs |
-| `henry_common` | Resolution of local data and model paths                            |
+| Package         | Responsibility                                                      |
+|-----------------|---------------------------------------------------------------------|
+| `henry_speech`  | Domain models, ports, adapters, services, and orchestration         |
+| `henry_cli_old` | Textual UI, console diagnostics, telemetry state, and buffered logs |
+| `henry_common`  | Resolution of local data and model paths                            |
 
 The event loop runs capture, transcription, processing, and replay tasks. Blocking operations live in long-running
 workers:

@@ -1,31 +1,40 @@
 from openwakeword import VAD
 
-from henry_common import PathLocator
+from henry_resources.models import ModelCatalog
 
 from ....audio import AudioFrame
+from ...config import VADSettings
+from ...domain import DetectionResult
 from ...ports import VADModel
-from .common import MODELS_PATH
+from .model import BaseModel
 
 
-class SileroVADModel(VADModel):
+class SileroVADModel(VADModel, BaseModel):
     _MODEL_PATH: str = "silero_vad.onnx"
     _FRAME_SIZE: int = 512
 
     def __init__(
         self,
-        locator: PathLocator,
+        catalog: ModelCatalog,
+        profile: VADSettings | None = None,
     ) -> None:
-        super().__init__("ONNX")
+        super().__init__(catalog=catalog, context="ONNX")
+        self._settings = profile if profile is not None else VADSettings()
         self._model: VAD | None = None
-        self._model_path = locator.ensure_model_path(MODELS_PATH, self._MODEL_PATH)
+        self._model_path = self._ensure_model_path(self._MODEL_PATH)
 
-    def predict(self, frame: AudioFrame) -> float:
+    def detect(self, frame: AudioFrame) -> DetectionResult:
         if self._model is None:
             raise RuntimeError("Model is not loaded")
 
         probability = self._model.predict(frame.samples, self._FRAME_SIZE)
 
-        return float(probability.item())
+        score = float(probability.item())
+
+        return DetectionResult(
+            score=score,
+            detected=score > self._settings.threshold,
+        )
 
     def reset(self) -> None:
         if self._model is not None:

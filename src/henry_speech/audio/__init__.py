@@ -1,3 +1,5 @@
+from .adapters import get_audio_driver
+from .config import AudioSettings
 from .domain import (
     AudioBuffer,
     AudioFormat,
@@ -18,4 +20,6 @@ __all__ = [
     "AudioInput",
     "AudioOutput",
     "AudioSamples",
+    "AudioSettings",
+    "get_audio_driver",
 ]

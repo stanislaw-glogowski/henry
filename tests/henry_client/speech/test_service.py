@@ -14,12 +14,12 @@ def test_speech_service_transcribes_and_streams_synthesis() -> None:
 
         async with service:
             text = await asyncio.wait_for(service.transcribe(frame()), timeout=1)
-            frames = [value async for value in service.synthesize("reply")]
+            frames = [value async for value in service.synthesize("graph")]
 
         assert text == "hello"
         assert len(frames) == 1
         assert frames[0].format.sample_rate == 22_050
-        assert tts.texts == ["reply"]
+        assert tts.texts == ["graph"]
 
     asyncio.run(scenario())
 
@@ -60,7 +60,7 @@ def test_speech_service_keeps_models_in_their_own_threads() -> None:
 
         async with service:
             await service.transcribe(frame())
-            _ = [value async for value in service.synthesize("reply")]
+            _ = [value async for value in service.synthesize("graph")]
 
         return stt, tts
 
@@ -86,7 +86,7 @@ def test_speech_service_propagates_synthesis_failure() -> None:
 
         async with service:
             with pytest.raises(RuntimeError, match="synthesis failed"):
-                _ = [value async for value in service.synthesize("reply")]
+                _ = [value async for value in service.synthesize("graph")]
 
     asyncio.run(scenario())
 
@@ -134,7 +134,7 @@ def test_speech_service_requires_open_executors_and_delegates_segmentation() -> 
         with pytest.raises(SpeechServiceError, match="STT executor is not open"):
             await service.transcribe(frame())
         with pytest.raises(SpeechServiceError, match="TTS executor is not open"):
-            _ = [value async for value in service.synthesize("reply")]
+            _ = [value async for value in service.synthesize("graph")]
 
         await service._stop()
 

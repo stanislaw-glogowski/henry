@@ -1,28 +1,23 @@
 from collections import deque
-from dataclasses import dataclass
 
 from ..audio import AudioBuffer, AudioFrame
 from ..capture import SpeechChunk
+from .config import SegmentationSettings
 from .domain import SpeechSegment
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentationConfig:
-    min_start_speech_frames: int = 10
-    max_start_silence_frames: int = 150
-    max_end_silence_frames: int = 50
-    pre_roll_frames: int = 15
 
 
 class SegmentationService:
     def __init__(
         self,
-        config: SegmentationConfig,
+        settings: SegmentationSettings | None = None,
     ) -> None:
-        self._config = config
+        if settings is None:
+            settings = SegmentationSettings()
+
+        self._settings = settings
         self._buffer = AudioBuffer()
         self._pending_frames: deque[AudioFrame] = deque(
-            maxlen=config.pre_roll_frames + config.min_start_speech_frames
+            maxlen=settings.pre_roll_frames + settings.min_start_speech_frames
         )
         self._speech_started = False
         self._start_speech_frames = 0
@@ -63,9 +58,9 @@ class SegmentationService:
         if not self._speech_started:
             self._pending_frames.append(chunk.audio)
 
-            if chunk.voice_detected:
+            if chunk.is_speech:
                 self._start_speech_frames += 1
-                if self._start_speech_frames >= self._config.min_start_speech_frames:
+                if self._start_speech_frames >= self._settings.min_start_speech_frames:
                     self._speech_started = True
                     self._start_silence_frames = 0
                     for pending_frame in self._pending_frames:
@@ -74,7 +69,7 @@ class SegmentationService:
             else:
                 self._start_speech_frames = 0
                 self._start_silence_frames += 1
-                if self._start_silence_frames > self._config.max_start_silence_frames:
+                if self._start_silence_frames > self._settings.max_start_silence_frames:
                     self._start_silence_frames = 0
                     return True
 
@@ -82,11 +77,11 @@ class SegmentationService:
 
         self._buffer.append(chunk.audio)
 
-        if chunk.voice_detected:
+        if chunk.is_speech:
             self._end_silence_frames = 0
         else:
             self._end_silence_frames += 1
-            if self._end_silence_frames > self._config.max_end_silence_frames:
+            if self._end_silence_frames > self._settings.max_end_silence_frames:
                 return True
 
         return False

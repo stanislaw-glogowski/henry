@@ -2,18 +2,18 @@ import asyncio
 
 from langgraph_sdk import get_client
 
-from henry_reply.reply import ReplyContext, ReplyGraph
-from henry_common.profile import load_profiles
+from henry_reply.graph import ReplyContext, ReplyGraph
+from henry_resources import LocalStore
 
 CLIENT_URL = "http://localhost:2024"
 
 
 async def run() -> None:
-    profiles = load_profiles()
+    local_store = LocalStore()
 
     client = get_client(url=CLIENT_URL)
 
-    for profile in profiles.values():
+    for profile in local_store.list_profiles():
         await client.assistants.create(
             ReplyGraph.NAME,
             name=profile.name,

@@ -6,10 +6,11 @@ from huggingface_hub.utils import disable_progress_bars
 from piper import PiperVoice, SynthesisConfig
 
 from ...audio import AudioFormat, AudioFrame
-from ..ports import SynthesisModel
+from ..config import TTSProfile
+from ..ports import TTSModel
 
 
-class PiperModel(SynthesisModel):
+class PiperModel(TTSModel):
     _REPOSITORY_ID: str = "rhasspy/piper-voices"
     _LENGTH_SCALE: float = 1.05
     _NOISE_SCALE: float | None = None
@@ -17,10 +18,10 @@ class PiperModel(SynthesisModel):
 
     def __init__(
         self,
-        model_path: str,
+        profile: TTSProfile,
     ) -> None:
         super().__init__()
-        self._model_path = model_path
+        self._profile = profile
         self._model: PiperVoice | None = None
 
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
@@ -59,16 +60,16 @@ class PiperModel(SynthesisModel):
         with disable_progress_bars():
             self._logger.debug(
                 "Loading model: model_path='{}'",
-                self._model_path,
+                self._profile.model,
             )
 
             model_path = hf_hub_download(
                 repo_id=self._REPOSITORY_ID,
-                filename=self._model_path,
+                filename=self._profile.model,
             )
             config_path = hf_hub_download(
                 repo_id=self._REPOSITORY_ID,
-                filename=self._model_path + ".json",
+                filename=self._profile.model + ".json",
             )
 
             assert isinstance(model_path, str)

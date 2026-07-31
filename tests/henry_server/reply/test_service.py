@@ -30,7 +30,7 @@ class FakeGraph:
             yield part
 
 
-def message_part(content: str, node: str = "reply") -> StreamPart:
+def message_part(content: str, node: str = "graph") -> StreamPart:
     return {
         "type": "messages",
         "ns": (),
@@ -78,7 +78,7 @@ def test_reply_ignores_non_message_stream_parts() -> None:
                 {
                     "type": "updates",
                     "ns": (),
-                    "data": {"reply": {}},
+                    "data": {"graph": {}},
                 }
             ]
         )

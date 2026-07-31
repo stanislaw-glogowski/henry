@@ -6,15 +6,17 @@ from mlx_audio.stt.models.parakeet import Model
 from mlx_audio.stt.utils import load_model
 
 from ....audio import AudioFrame
+from ...config import STTProfile
 from ...domain import TranscriptionChunk
-from ...ports import TranscriptionModel
+from ...ports import STTModel
 
 
-class ParakeetTDTModel(TranscriptionModel):
-    _MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
+class ParakeetTDTModel(STTModel):
+    _DEFAULT_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
-    def __init__(self) -> None:
+    def __init__(self, profile: STTProfile | None) -> None:
         super().__init__("MLX")
+        self._profile = profile if profile is not None else STTProfile()
         self._model: Model | None = None
 
     def transcribe(self, frame: AudioFrame) -> Iterator[TranscriptionChunk]:
@@ -30,9 +32,13 @@ class ParakeetTDTModel(TranscriptionModel):
         if self._model is not None:
             raise RuntimeError("Model is already loaded")
 
+        model_id = (
+            self._profile.model if self._profile.model else self._DEFAULT_MODEL_ID
+        )
+
         with disable_progress_bars():
-            self._logger.debug("Loading model: model_id='{}'", self._MODEL_ID)
-            model = load_model(self._MODEL_ID)
+            self._logger.debug("Loading model: model_id='{}'", model_id)
+            model = load_model(model_id)
             assert isinstance(model, Model)
             self._model = model
 
