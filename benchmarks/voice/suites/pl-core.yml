@@ -1,0 +1,75 @@
+id: pl-core
+description: Core Polish read-speech suite for comparing STT models.
+prompts:
+  - id: pl-short-001
+    category: short-question
+    text: Która jest teraz godzina?
+  - id: pl-short-002
+    category: short-command
+    text: Włącz światło w salonie.
+  - id: pl-short-003
+    category: short-answer
+    text: Tak, dokładnie o to mi chodziło.
+  - id: pl-short-004
+    category: short-command
+    text: Przestań mówić i posłuchaj mnie przez chwilę.
+  - id: pl-natural-001
+    category: natural-question
+    text: Czy jutro rano będzie padać, czy mogę spokojnie pojechać rowerem?
+  - id: pl-natural-002
+    category: natural-question
+    text: Co ostatnio omawialiśmy i od czego najlepiej teraz zacząć?
+  - id: pl-natural-003
+    category: natural-request
+    text: Wyjaśnij mi to jeszcze raz, ale tym razem trochę prościej.
+  - id: pl-natural-004
+    category: natural-request
+    text: Opowiedz krótko, dlaczego ta zmiana może poprawić płynność rozmowy.
+  - id: pl-number-001
+    category: numbers
+    text: Przypomnij mi jutro o wpół do ósmej, żebym zadzwonił do Michała.
+  - id: pl-number-002
+    category: numbers
+    text: Spotkanie odbędzie się dwudziestego trzeciego października dwa tysiące dwudziestego szóstego roku.
+  - id: pl-number-003
+    category: numbers
+    text: Temperatura wynosi minus trzy i pół stopnia, a ciśnienie tysiąc dwanaście hektopaskali.
+  - id: pl-name-001
+    category: names
+    text: Wyślij wiadomość do Grzegorza Brzęczyszczykiewicza.
+  - id: pl-name-002
+    category: names
+    text: Sprawdź połączenie z Krakowa do Jeleniej Góry przez Wrocław.
+  - id: pl-tech-001
+    category: mixed-technical
+    text: Czy możesz wyjaśnić, czym różni się asyncio od zwykłego wątku?
+  - id: pl-tech-002
+    category: mixed-technical
+    text: Uruchom benchmark dla Parakeeta, Chatterboxa i Whispera.
+  - id: pl-tech-003
+    category: mixed-technical
+    text: Problem występuje w WebSocket, ale tylko podczas działania event loopa.
+  - id: pl-correction-001
+    category: self-correction
+    text: Nie, chwileczkę, chodziło mi o przyszły czwartek, nie o ten najbliższy.
+  - id: pl-correction-002
+    category: self-correction
+    text: Ustaw alarm na siódmą, właściwie nie, ustaw go na siódmą trzydzieści.
+  - id: pl-correction-003
+    category: self-correction
+    text: Otwórz dokument, to znaczy raport, który przygotowaliśmy wczoraj.
+  - id: pl-long-001
+    category: long-form
+    text: Zanim podejmiemy decyzję, porównajmy dokładność rozpoznawania, opóźnienie pierwszej odpowiedzi oraz ilość pamięci potrzebnej podczas zwykłej rozmowy.
+  - id: pl-long-002
+    category: long-form
+    text: Kiedy skończysz analizę wyników, podsumuj najważniejsze różnice, wskaż ryzyka i zaproponuj następny krok, ale niczego jeszcze nie zmieniaj.
+  - id: pl-colloquial-001
+    category: colloquial
+    text: No dobra, zobaczmy, czy tym razem zadziała to tak, jak powinno.
+  - id: pl-colloquial-002
+    category: colloquial
+    text: W sumie możemy zrobić to później, bo teraz nie mam do tego głowy.
+  - id: pl-colloquial-003
+    category: colloquial
+    text: Daj mi sekundę, zaraz sobie przypomnę, o co dokładnie chciałem zapytać.

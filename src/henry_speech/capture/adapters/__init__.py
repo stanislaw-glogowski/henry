@@ -1,7 +1,10 @@
-from henry_resources.models import ModelCatalog
+from typing import TYPE_CHECKING
 
-from ..config import VADSettings, WakeWordProfile, WakeWordSettings
-from ..ports import VADModel, WakeWordModel
+if TYPE_CHECKING:
+    from henry_resources.models import ModelCatalog
+
+    from ..config import VADSettings, WakeWordProfile, WakeWordSettings
+    from ..ports import VADModel, WakeWordModel
 
 
 def get_vad_model(
@@ -10,7 +13,7 @@ def get_vad_model(
 ) -> VADModel:
     match settings.adapter:
         case "mlx:silero_vad":
-            from .mlx_audio import SileroVADModel
+            from .mlx_audio.silero_vad import SileroVADModel
 
             return SileroVADModel(settings)
         case "openwakeword":
@@ -18,7 +21,7 @@ def get_vad_model(
 
             return SileroVADModel(catalog, settings)
         case _:
-            raise ValueError(f"Unknown VAD adapter: {settings.adapter}")
+            raise ValueError(f"Unsupported VAD adapter: {settings.adapter!r}")
 
 
 def get_wakeword_model(
@@ -32,4 +35,4 @@ def get_wakeword_model(
 
             return OpenWakeWordModel(catalog, profile)
         case _:
-            raise ValueError(f"Unknown wake word adapter: {settings.adapter}")
+            raise ValueError(f"Unsupported wake-word adapter: {settings.adapter!r}")

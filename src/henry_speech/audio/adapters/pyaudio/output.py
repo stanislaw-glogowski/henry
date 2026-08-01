@@ -1,28 +1,29 @@
 import pyaudio
 
-from ...domain import AudioFormat, AudioFrame
+from ...domain import AudioFormat, AudioFrame, AudioPlaybackOutcome
 from ...ports import AudioOutput
 
 
 class PyAudioOutput(AudioOutput):
+    _FRAMES_PER_BUFFER = 512
+
     def __init__(
         self,
         session: pyaudio.PyAudio,
-        frames_per_buffer: int,
     ) -> None:
         super().__init__()
         self._session = session
-        self._frames_per_buffer = frames_per_buffer
         self._format: AudioFormat | None = None
         self._stream: pyaudio.Stream | None = None
 
-    def write(self, frame: AudioFrame) -> None:
+    def write(self, frame: AudioFrame) -> AudioPlaybackOutcome:
         stream = self._require_stream(frame.format)
         stream.write(frame.to_bytes())
+        return AudioPlaybackOutcome.PLAYED
 
     def open(self) -> None:
         if self._stream is not None:
-            raise RuntimeError("Stream is already open")
+            raise RuntimeError("PyAudio output stream is already open")
 
     def close(self) -> None:
         stream = self._stream
@@ -47,7 +48,7 @@ class PyAudioOutput(AudioOutput):
         stream = self._session.open(
             rate=format.sample_rate,
             channels=format.channels,
-            frames_per_buffer=self._frames_per_buffer,
+            frames_per_buffer=self._FRAMES_PER_BUFFER,
             output=True,
             format=pyaudio.paFloat32,
         )
@@ -58,6 +59,6 @@ class PyAudioOutput(AudioOutput):
             "Stream OPENED: sample_rate={}, channels={}, frames_per_buffer={}",
             format.sample_rate,
             format.channels,
-            self._frames_per_buffer,
+            self._FRAMES_PER_BUFFER,
         )
         return stream

@@ -2,14 +2,24 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from henry_speech.audio import AudioBuffer, AudioFormat
+from henry_speech.audio import AudioFormat
+from henry_speech.audio.adapters.pyaudio import (
+    PyAudioDriver,
+    PyAudioInput,
+    PyAudioOutput,
+)
 from henry_speech.capture import DetectionResult, SpeechChunk, WakeWordProfile
 from henry_speech.config import SpeechProfile, SpeechSettings
-from henry_speech.events import SpeechChunkCaptured, VADObserved, WakeWordObserved
-from henry_speech.segmentation import SegmentationService
+from henry_speech.events import (
+    InteractionTimingObserved,
+    SpeechChunkCaptured,
+    VADObserved,
+    WakeWordObserved,
+)
+from henry_speech.segmentation import UtteranceSegmenter
 from henry_speech.segmentation.config import SegmentationSettings
 from henry_speech.synthesis import TTSProfile
-from henry_speech.transcription import STTProfile
+from henry_speech.transcription import STTProfile, TurnEndpointDetector
 
 FORMAT = AudioFormat(sample_rate=16_000, channels=1)
 
@@ -26,7 +36,7 @@ def chunk(*, speech: bool, wakeword: bool = False) -> SpeechChunk:
     )
 
 
-def test_audio_format_frames_and_buffer() -> None:
+def test_audio_format_and_frames() -> None:
     other_channels = AudioFormat(sample_rate=16_000, channels=2)
     other_rate = AudioFormat(sample_rate=8_000, channels=1)
     with pytest.raises(RuntimeError, match="channel"):
@@ -39,17 +49,11 @@ def test_audio_format_frames_and_buffer() -> None:
     assert rebuilt.samples_count == 2
     np.testing.assert_array_equal(rebuilt.samples, original.samples)
 
-    buffer = AudioBuffer()
-    assert len(buffer) == 0
-    assert buffer.build() is None
-    buffer.append(frame(1.0))
-    buffer.append(frame(2.0))
-    assert len(buffer) == 2
-    np.testing.assert_array_equal(buffer.build().samples, [1.0, 2.0])
-    with pytest.raises(RuntimeError, match="sample rate"):
-        buffer.append(other_rate.build_frame(np.asarray([0.0], dtype=np.float32)))
-    buffer.clear()
-    assert buffer.build() is None
+
+def test_pyaudio_adapter_package_exports_concrete_types() -> None:
+    assert PyAudioDriver.__name__ == "PyAudioDriver"
+    assert PyAudioInput.__name__ == "PyAudioInput"
+    assert PyAudioOutput.__name__ == "PyAudioOutput"
 
 
 def test_capture_domain_and_telemetry_events() -> None:
@@ -73,29 +77,63 @@ def test_capture_domain_and_telemetry_events() -> None:
         is_speech=True,
         is_wakeword=True,
     )
+    assert InteractionTimingObserved("turn_ready", 0).elapsed_ms == 0
 
 
 def test_segmentation_detects_utterance_timeout_and_reset() -> None:
     settings = SegmentationSettings(
         min_start_speech_frames=2,
         max_start_silence_frames=1,
-        max_end_silence_frames=1,
+        max_end_silence_frames=2,
+        short_utterance_speech_frames=1,
+        short_utterance_end_silence_frames=2,
+        max_utterance_frames=10,
         pre_roll_frames=1,
     )
-    service = SegmentationService(settings)
+    segmenter = UtteranceSegmenter(settings)
 
-    assert service.feed(chunk(speech=False)) == (False, None)
-    assert service.feed(chunk(speech=False)) == (True, None)
-    assert service.feed(chunk(speech=True)) == (False, None)
-    assert service.feed(chunk(speech=False)) == (False, None)
-    assert service.feed(chunk(speech=True)) == (False, None)
-    assert service.feed(chunk(speech=True)) == (False, None)
-    assert service.feed(chunk(speech=False)) == (False, None)
-    ended, segment = service.feed(chunk(speech=False))
+    assert segmenter.feed(chunk(speech=False)) == (False, None)
+    assert segmenter.feed(chunk(speech=False)) == (True, None)
+    assert segmenter.feed(chunk(speech=True)) == (False, None)
+    assert segmenter.feed(chunk(speech=False)) == (False, None)
+    assert segmenter.feed(chunk(speech=True)) == (False, None)
+    assert segmenter.feed(chunk(speech=True)) == (False, None)
+    assert segmenter.feed(chunk(speech=False)) == (False, None)
+    ended, segment = segmenter.feed(chunk(speech=False))
     assert ended
     assert segment is not None
     assert segment.audio.samples_count == 10
-    service.reset()
+    segmenter.reset()
+
+
+def test_segmentation_uses_longer_pause_for_short_utterance_and_hard_limit() -> None:
+    segmenter = UtteranceSegmenter(
+        SegmentationSettings(
+            min_start_speech_frames=1,
+            max_start_silence_frames=2,
+            max_end_silence_frames=1,
+            short_utterance_speech_frames=3,
+            short_utterance_end_silence_frames=2,
+            max_utterance_frames=5,
+            pre_roll_frames=0,
+        )
+    )
+
+    assert segmenter.feed(chunk(speech=True)) == (False, None)
+    assert segmenter.feed(chunk(speech=False)) == (False, None)
+    ended, segment = segmenter.feed(chunk(speech=False))
+    assert ended and segment is not None
+
+    segmenter.feed(chunk(speech=True))
+    segmenter.feed(chunk(speech=True))
+    segmenter.feed(chunk(speech=True))
+    ended, segment = segmenter.feed(chunk(speech=False))
+    assert ended and segment is not None
+
+    for _ in range(4):
+        assert segmenter.feed(chunk(speech=True)) == (False, None)
+    ended, segment = segmenter.feed(chunk(speech=True))
+    assert ended and segment is not None
 
 
 def test_speech_configuration_defaults_and_validation() -> None:
@@ -105,8 +143,32 @@ def test_speech_configuration_defaults_and_validation() -> None:
         stt=STTProfile(),
     )
     assert profile.stt.model is None
-    assert SpeechSettings().audio.driver == "pyaudio"
+    assert SpeechSettings().audio.driver == "avfaudio"
     assert SpeechSettings().segmentation.min_start_speech_frames == 10
 
     with pytest.raises(ValidationError, match="ONNX"):
         WakeWordProfile(model="wake.bin")
+
+
+def test_turn_endpoint_detector_recognizes_continuations() -> None:
+    detector = TurnEndpointDetector()
+
+    assert detector.is_complete("Jaka jest pogoda")
+    assert detector.is_complete("To wszystko.")
+    assert not detector.is_complete("Chcę wiedzieć, ponieważ")
+    assert not detector.is_complete("Jeszcze jedna rzecz...")
+    assert not detector.is_complete("")
+    assert detector.is_complete("123")
+
+
+def test_segmentation_configuration_rejects_inconsistent_limits() -> None:
+    with pytest.raises(ValidationError, match="short_utterance_end_silence_frames"):
+        SegmentationSettings(
+            max_end_silence_frames=10,
+            short_utterance_end_silence_frames=9,
+        )
+    with pytest.raises(ValidationError, match="max_utterance_frames"):
+        SegmentationSettings(
+            short_utterance_speech_frames=10,
+            max_utterance_frames=10,
+        )

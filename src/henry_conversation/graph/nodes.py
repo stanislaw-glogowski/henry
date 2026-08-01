@@ -20,14 +20,12 @@ class ConversationNodes:
         self,
         state: ConversationState,
         runtime: ConversationRuntime,
-    ) -> dict[str, list[AnyMessage]]:
+    ) -> dict[str, list[AnyMessage] | str]:
         context = runtime.context
         summary = state.get("summary", "")
         messages = state.get("messages", [])[-context.recent_messages :]
         system_prompt = self._format_system_prompt(context, summary)
         opening_prompt = PromptTemplate.from_template(context.opening_prompt).format(
-            name=context.name,
-            language=context.language,
             conversation_summary=summary or "No previous conversation.",
             recent_conversation=self._format_messages(messages),
         )
@@ -35,22 +33,24 @@ class ConversationNodes:
             [
                 SystemMessage(content=system_prompt),
                 SystemMessage(content=opening_prompt),
+                *self._delivery_messages(state),
                 *messages,
             ]
         )
-        return {"messages": [response]}
+        return {"messages": [response], "delivery_context": ""}
 
     async def reply(
         self,
         state: ConversationState,
         runtime: ConversationRuntime,
-    ) -> dict[str, list[AnyMessage]]:
+    ) -> dict[str, list[AnyMessage] | str]:
         context = runtime.context
         summary = state.get("summary", "")
         messages = state["messages"][-context.recent_messages :]
         response = await self._model(context).ainvoke(
             [
                 SystemMessage(content=self._format_system_prompt(context, summary)),
+                *self._delivery_messages(state),
                 *messages,
             ]
         )
@@ -68,8 +68,10 @@ class ConversationNodes:
                 state["messages"][-context.recent_messages :]
             ),
         )
-        response = await self._model(context).ainvoke(summary_prompt)
-        return {"summary": response.text}
+        response = await self._model(context).ainvoke(
+            [*self._delivery_messages(state), SystemMessage(content=summary_prompt)]
+        )
+        return {"summary": response.text, "delivery_context": ""}
 
     def _model(self, context: ConversationContext) -> BaseChatModel:
         if model := self._models.get(context.model):
@@ -89,8 +91,6 @@ class ConversationNodes:
         summary: str,
     ) -> str:
         return PromptTemplate.from_template(context.system_prompt).format(
-            name=context.name,
-            language=context.language,
             conversation_summary=summary or "No previous conversation.",
         )
 
@@ -102,3 +102,10 @@ class ConversationNodes:
         return "\n".join(
             f"{message.type}: {message.text}" for message in messages if message.text
         )
+
+    @staticmethod
+    def _delivery_messages(state: ConversationState) -> list[SystemMessage]:
+        context = state.get("delivery_context", "")
+        if not context:
+            return []
+        return [SystemMessage(content=context)]

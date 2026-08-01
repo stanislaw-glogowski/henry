@@ -44,7 +44,7 @@ class CaptureService(AbstractAsyncService):
 
     async def capture(self) -> AsyncIterator[SpeechChunk]:
         if self._capture_future is not None:
-            raise RuntimeError("Capture is already running")
+            raise RuntimeError("Audio capture is already in progress")
 
         loop = asyncio.get_running_loop()
         responses = asyncio.Queue()

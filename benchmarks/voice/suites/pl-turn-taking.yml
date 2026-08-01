@@ -1,0 +1,39 @@
+id: pl-turn-taking
+description: Polish utterances with controlled pauses for endpointing and continuation tests.
+prompts:
+  - id: turn-pause-001
+    category: incomplete-pause
+    text: Chciałem zapytać, czy jutro będzie padać?
+    instruction: Pause for about 700 milliseconds after “Chciałem zapytać”.
+  - id: turn-pause-002
+    category: connector-pause
+    text: To zależy od tego, czy będę miał rano czas.
+    instruction: Pause for about one second after “czy”.
+  - id: turn-pause-003
+    category: conjunction-pause
+    text: Najpierw sprawdź pogodę, a później kalendarz.
+    instruction: Pause for about 700 milliseconds before “a”.
+  - id: turn-pause-004
+    category: correction-pause
+    text: Nie, chodziło mi o zupełnie inne spotkanie.
+    instruction: Pause for about one second after “chodziło mi”.
+  - id: turn-pause-005
+    category: thinking-pause
+    text: Potrzebuję chwili, żeby przypomnieć sobie jego nazwisko.
+    instruction: Make a natural 1.5-second pause before “jego”.
+  - id: turn-complete-001
+    category: complete-short
+    text: Tak.
+  - id: turn-complete-002
+    category: complete-short
+    text: Nie, dziękuję.
+  - id: turn-complete-003
+    category: complete-question
+    text: A co z jutrzejszym spotkaniem?
+  - id: turn-correction-001
+    category: correction
+    text: Ustaw minutnik na dziesięć minut, nie, jednak na piętnaście.
+  - id: turn-list-001
+    category: enumerating
+    text: Potrzebuję mleka, chleba, kawy i czegoś słodkiego.
+    instruction: Make short, natural pauses between list items.

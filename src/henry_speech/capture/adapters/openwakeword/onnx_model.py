@@ -5,7 +5,7 @@ from henry_resources.models import ModelCatalog
 from henry_speech.capture.ports import DetectionModel
 
 
-class BaseModel(DetectionModel, ABC):
+class OpenWakeWordONNXModel(DetectionModel, ABC):
     _MODELS_PATH = Path("openwakeword")
 
     def __init__(self, catalog: ModelCatalog, context: str | None = None):
@@ -14,6 +14,6 @@ class BaseModel(DetectionModel, ABC):
 
     def _ensure_model_path(self, model_path: str) -> Path:
         if not model_path.endswith(".onnx"):
-            raise ValueError("wakeword model must be an ONNX file")
+            raise ValueError(f"OpenWakeWord model must be an ONNX file: {model_path!r}")
 
         return self._catalog.ensure_model_path(self._MODELS_PATH, model_path)

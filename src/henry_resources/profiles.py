@@ -2,17 +2,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from henry_conversation.config import ConversationProfile
 from henry_speech.config import SpeechProfile
-
-
-class ProfileModel(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-    )
 
 
 class Profile(SpeechProfile):
@@ -24,7 +17,6 @@ class Profile(SpeechProfile):
     id: str = Field(exclude=True)
     path: Path = Field(exclude=True)
     name: str = Field(min_length=1)
-    language: str = Field(min_length=1)
     conversation: ConversationProfile
 
     @staticmethod
@@ -53,7 +45,7 @@ class Profile(SpeechProfile):
     def _read_prompt(profile_path: Path, name: str) -> str:
         path = profile_path / "prompts" / name
         if not path.is_file():
-            raise FileNotFoundError(f"Profile prompt not found: {path}")
+            raise FileNotFoundError(f"Profile prompt file does not exist: {path}")
         return path.read_text(encoding="utf-8")
 
 

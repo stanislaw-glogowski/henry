@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 
 from langchain.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -7,16 +8,18 @@ from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
 
 from .events import (
+    CancelReply,
     ConversationActivated,
     ConversationInput,
     GenerateReply,
     ReplyChunk,
-    ReplyCompleted,
-    ReplyLine,
-    ReplyStarted,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
 from .graph import ConversationContext, ConversationGraph, ConversationNodes
+from .reply_segmentation import ReplySegmenter
 
 
 class Worker(Component):
@@ -33,6 +36,8 @@ class Worker(Component):
         self._graph = graph
         self._context = context
         self._graph_queue: asyncio.Queue[ConversationInput] = asyncio.Queue()
+        self._active_reply: asyncio.Task[None] | None = None
+        self._delivery_context = ""
         self._shutdown_event = asyncio.Event()
         self._logger.debug("INITIALIZED")
 
@@ -52,12 +57,18 @@ class Worker(Component):
                 task.cancel()
 
     async def _events_loop(self) -> None:
-        with self._event_bus.subscribe(GenerateReply, ShutdownEvent) as events:
+        with self._event_bus.subscribe(
+            CancelReply,
+            GenerateReply,
+            ShutdownEvent,
+        ) as events:
             async for event in events:
                 try:
                     match event:
                         case GenerateReply(input):
                             self._graph_queue.put_nowait(input)
+                        case CancelReply(spoken_text):
+                            await self._cancel_reply(spoken_text)
                         case ShutdownEvent():
                             self._shutdown_event.set()
                 finally:
@@ -68,21 +79,58 @@ class Worker(Component):
             conversation_input = await self._graph_queue.get()
 
             try:
-                self._event_bus.publish(ReplyStarted())
-                await self._stream(conversation_input)
+                self._event_bus.publish(ReplyGenerationStarted())
+                self._active_reply = asyncio.create_task(
+                    self._stream(conversation_input)
+                )
+                try:
+                    await self._active_reply
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise
             finally:
-                self._event_bus.publish(ReplyCompleted())
+                self._active_reply = None
+                self._event_bus.publish(ReplyGenerationCompleted())
                 self._graph_queue.task_done()
 
+    async def _cancel_reply(self, spoken_text: str) -> None:
+        active_reply = self._active_reply
+        if active_reply is not None:
+            active_reply.cancel()
+            with suppress(asyncio.CancelledError):
+                await active_reply
+
+        while True:
+            try:
+                self._graph_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                self._graph_queue.task_done()
+
+        self._delivery_context = (
+            # The next graph run receives delivery state as input instead of
+            # mutating a checkpoint while its current run is being cancelled.
+            "The previous answer was interrupted. The user heard only this "
+            f"prefix: {spoken_text!r}. Do not assume they heard the remainder."
+            if spoken_text
+            else "The previous answer was interrupted before any part was delivered. "
+            "Do not assume the user heard it."
+        )
+
     async def _stream(self, conversation_input: ConversationInput) -> None:
+        delivery_context, self._delivery_context = self._delivery_context, ""
         match conversation_input:
             case ConversationActivated():
                 graph_input = {
+                    "delivery_context": delivery_context,
                     "input_kind": "activation",
                     "messages": [],
                 }
             case UserTurn(text):
                 graph_input = {
+                    "delivery_context": delivery_context,
                     "input_kind": "user_turn",
                     "messages": [HumanMessage(content=text)],
                 }
@@ -90,7 +138,7 @@ class Worker(Component):
         config: RunnableConfig = {
             "configurable": {"thread_id": self.THREAD_ID},
         }
-        line_buffer = ""
+        segmenter = ReplySegmenter()
 
         async for message, metadata in self._graph.compiled.astream(
             input=graph_input,
@@ -108,12 +156,8 @@ class Worker(Component):
                 continue
 
             self._event_bus.publish(ReplyChunk(text=chunk))
-            line_buffer += chunk
+            for phrase in segmenter.feed(chunk):
+                self._event_bus.publish(ReplyPhrase(text=phrase))
 
-            while "\n" in line_buffer:
-                line, line_buffer = line_buffer.split("\n", maxsplit=1)
-                if line:
-                    self._event_bus.publish(ReplyLine(text=line))
-
-        if line_buffer:
-            self._event_bus.publish(ReplyLine(text=line_buffer))
+        for phrase in segmenter.flush():
+            self._event_bus.publish(ReplyPhrase(text=phrase))

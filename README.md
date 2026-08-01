@@ -10,7 +10,8 @@ Henry keeps wake-word detection, speech recognition, language generation, and sp
 logging the live pipeline to the console.
 
 The project is intentionally small and explicit: asyncio coordinates the application, dedicated worker threads own
-blocking audio and ML runtimes, and ports keep domain services independent from concrete adapters.
+blocking ML runtimes, the native helper owns full-duplex audio, and ports keep domain services independent from concrete
+adapters.
 
 ## ✨ Features
 
@@ -18,19 +19,23 @@ blocking audio and ML runtimes, and ports keep domain services independent from 
 - Streaming OpenWakeWord detection with Silero VAD.
 - Multilingual Parakeet speech recognition, including Polish.
 - Conversation history and summarization with LangGraph and local Ollama.
-- Line-buffered Piper speech synthesis.
+- Phrase-streamed Piper speech synthesis.
+- Adaptive acoustic and semantic turn endpointing.
+- Native macOS voice processing with acoustic echo cancellation, soft ducking,
+  and barge-in.
 - Console logging with one default local profile.
 - Explicit asyncio, worker-thread, port, and adapter boundaries.
 
 ## 🎙️ Voice pipeline
 
 ```text
-Microphone (16 kHz)
+Microphone -> Apple Voice Processing (AEC, NS, AGC) -> native PCM channel 0
+  -> streaming resampling (16 kHz, 512-sample frames)
   -> Silero VAD + OpenWakeWord
-  -> utterance segmentation
-  -> Parakeet STT
+  -> adaptive utterance segmentation
+  -> Parakeet STT + semantic continuation detection
   -> LangGraph + Ollama
-  -> line-buffered reply
+  -> speakable phrase segmentation
   -> Piper TTS (22.05 kHz)
   -> speakers
 ```
@@ -39,13 +44,22 @@ Henry begins in wake-word mode. Activation starts a finite LangGraph run that ge
 summary and recent messages. The voice session then remains active for follow-up utterances. Each user turn runs the
 reply and summary nodes and stores its state under the in-process `thread_id="default"`.
 
+Model text is divided at natural phrase boundaries so TTS can start before the
+whole response exists. During playback, likely user speech first lowers the
+assistant volume; sustained speech cancels generation, synthesis, and native
+playback. Only phrases confirmed as played are described to the next graph run
+as heard by the user.
+
 ## 📦 Requirements
 
 - Apple Silicon Mac with Metal support
 - macOS default input and output audio devices
 - Python 3.14
 - [uv](https://docs.astral.sh/uv/)
-- PortAudio, typically installed with `brew install portaudio`
+- Xcode or the Xcode Command Line Tools with Swift
+
+PortAudio, typically installed with `brew install portaudio`, is required only
+when using the fallback `pyaudio` audio driver.
 
 The MLX models require real Apple Silicon hardware. Unit tests do not require a microphone, speakers, Metal, ONNX
 models, or downloaded Hugging Face models.
@@ -55,6 +69,15 @@ models, or downloaded Hugging Face models.
 ```bash
 uv sync
 ```
+
+The package build compiles the `henry-audio` Swift helper when its executable
+is missing or older than its sources. `./scripts/build-native-audio.sh` can be
+used to rebuild it explicitly. The helper owns one full-duplex
+`AVAudioEngine` session, so playback is available to Apple's echo canceller as
+the reference signal for microphone capture.
+
+`uv sync` installs development tools, including the LangGraph CLI. They are not
+part of Henry's runtime dependency set.
 
 ## 🧠 Model setup
 
@@ -153,37 +176,151 @@ uv run henry-cli
 The CLI intentionally has no arguments. Use `HENRY_HOME` only to select the local data directory. `Ctrl+C` requests a
 clean shutdown.
 
+The default audio driver is configured in `settings.yml`:
+
+```yaml
+speech:
+  audio:
+    driver: avfaudio
+  segmentation:
+    max_end_silence_frames: 18
+    short_utterance_speech_frames: 31
+    short_utterance_end_silence_frames: 28
+    max_utterance_frames: 1875
+```
+
+Use `driver: pyaudio` as a fallback when native voice processing is not
+available. Developers can point at a separately built helper with
+`HENRY_AUDIO_HELPER`; normal installations use the packaged executable.
+
+Alternative speech adapters can be selected in `settings.yml`. They load their
+models only when Henry starts:
+
+```yaml
+speech:
+  stt:
+    adapter: mlx:qwen3-asr  # or mlx:parakeet-tdt / mlx:whisper
+  tts:
+    adapter: mlx:chatterbox # or piper
+```
+
+The corresponding `stt.model` and `tts.model` values belong to the active
+profile. `stt.language` is an optional adapter-specific hint; set it to `pl`
+for Polish Whisper profiles and omit it when Whisper should detect English.
+Parakeet and Piper remain the defaults until recorded Polish
+benchmarks demonstrate a better choice.
+
+Segmentation values count 512-sample frames at 16 kHz, so one frame is 32 ms.
+The defaults use approximately 576 ms of trailing silence for established
+speech, 896 ms for a short utterance, and a 60-second hard limit. Tune these
+values only after reviewing interaction timing logs and testing real pauses.
+
 ## 🏗️ Architecture
 
 | Package              | Responsibility                                                        |
 |----------------------|-----------------------------------------------------------------------|
 | `henry_speech`       | Audio, wake word, segmentation, STT, TTS, playback, voice session    |
-| `henry_conversation` | LangGraph routing, history, summary, model replies, line buffering   |
+| `henry_conversation` | LangGraph routing, history, summary, model replies, phrase buffering |
 | `henry_resources`    | Local profiles, prompts, settings, and model paths                   |
 | `henry_cli`          | Default composition root, signals, and console logging               |
 | `henry_common`       | Shared lifecycle, events, logging, and validation                     |
 
-The event loop runs capture, transcription, processing, and replay tasks. Blocking operations live in long-running
-workers:
+The event loop coordinates capture, segmentation, conversation, synthesis,
+playback, and control queues. Blocking operations remain with their owners:
 
-- audio input owns PyAudio input, Silero VAD, and OpenWakeWord;
-- audio output owns the PyAudio output stream;
+- the native audio helper owns AVAudioEngine input, output, voice processing,
+  ducking, gain restoration, and immediate playback interruption;
+- the speech capture worker owns Silero VAD and OpenWakeWord;
 - STT owns Parakeet and its MLX runtime;
 - TTS owns Piper;
 - conversation calls the local Ollama model through LangChain.
 
-Worker-side requests use `queue.Queue`. Results return to asyncio queues or futures through
-`loop.call_soon_threadsafe(...)`.
+Async pipeline boundaries use `asyncio.Queue`. Dedicated ML worker threads
+return results through futures and `loop.call_soon_threadsafe(...)`; the native
+audio process uses a framed standard-input/standard-output protocol read by one
+Python thread.
 
 ## 🧪 Development
+
+### Voice benchmarks
+
+Henry includes an interactive recorder, Polish STT/turn-taking/TTS suites,
+adapter runners, CSV/JSONL measurements, Markdown reports, and blind TTS
+reviews. No model is downloaded while listing prompts or recording audio.
+
+```bash
+uv run python -m tools.voice_benchmark list --suite pl-core
+uv run python -m tools.voice_benchmark record \
+  --suite pl-core --speaker speaker-01 --condition quiet
+```
+
+Generated audio and results are kept below `HENRY_HOME/benchmarks` rather than
+the repository. The complete recording and evaluation protocol is documented
+in [`benchmarks/voice/README.md`](benchmarks/voice/README.md).
+
+### Raw audio loopback
+
+Use the standalone audio diagnostic to hear the raw microphone signal received
+by the configured audio driver. It does not initialize VAD, wake word, STT, TTS,
+or the conversation pipeline:
+
+```bash
+uv run python -m tools.audio_diagnostic --seconds 5
+```
+
+The command prints the captured format, RMS level, and peak level before
+playing the frame once. To compare the native path with PortAudio, select a
+driver explicitly:
+
+```bash
+uv run python -m tools.audio_diagnostic --seconds 5 --driver pyaudio
+```
+
+To isolate native device capture from Apple's Voice Processing I/O, disable
+voice processing for one diagnostic run:
+
+```bash
+HENRY_AUDIO_VOICE_PROCESSING=0 \
+  uv run python -m tools.audio_diagnostic --seconds 5 --driver avfaudio
+```
+
+This switch is diagnostic only. It disables acoustic echo cancellation and
+must not be used as the normal Henry configuration.
+
+Measure full-duplex echo cancellation by playing a deterministic test signal
+while recording the microphone. Remain silent during the measurement; the
+command reports the residual level and plays back what the microphone heard:
+
+```bash
+uv run python -m tools.audio_diagnostic \
+  --seconds 5 --driver avfaudio --duplex
+```
+
+For a meaningful comparison, repeat the same test without Voice Processing and
+without changing device selection or volume:
+
+```bash
+HENRY_AUDIO_VOICE_PROCESSING=0 \
+  uv run python -m tools.audio_diagnostic \
+  --seconds 5 --driver avfaudio --duplex
+```
+
+`relative_to_playback` is not a calibrated acoustic ERLE measurement. Use the
+difference between the two runs to evaluate echo suppression on one device
+setup.
+
+### Automated verification
 
 Run the complete automated verification:
 
 ```bash
-uv run ruff check src tests
-uv run ruff format --check src tests pyproject.toml
+uv run ruff check hatch_build.py src tests tools
+uv run ruff format --check hatch_build.py src tests tools pyproject.toml
 uv run pytest -q
-uv run python -m compileall -q src tests
+uv run python -m compileall -q hatch_build.py src tests tools
+swift format lint --recursive native/macos/henry-audio
+swift test --package-path native/macos/henry-audio
+uv build
 ```
 
 The tests progress from pure domain behavior to service lifecycle and complete orchestration. Fake ports exercise real
@@ -203,10 +340,13 @@ UV_CACHE_DIR=/private/tmp/uv-cache
 ## ⚠️ Current limitations
 
 - macOS and Apple Silicon are the only supported runtime target.
-- Input and output use the current default PortAudio devices.
-- The application has no acoustic echo cancellation or barge-in support.
-- Session expiry is based on consecutive empty utterance windows, not wall-clock inactivity.
-- Utterance segmentation currently relies on trailing silence and has no hard maximum recording duration.
+- AVFAudio uses the current default macOS input and output devices.
+- Native helper startup and acoustic behavior still require a manual
+  microphone/speaker smoke test on the target Mac.
+- Acoustic endpoint thresholds are frame-based. Semantic continuation detection
+  is deliberately conservative and does not start speculative LLM work.
+- Playback delivery tracking confirms complete spoken phrases, not the exact
+  sample or word at which an interrupted phrase stopped.
 
 Hardware behavior still requires a manual smoke test. Passing fake-stream tests does not prove that a particular
 microphone, output device, or aggregate audio configuration is compatible.

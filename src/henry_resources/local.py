@@ -21,18 +21,20 @@ class LocalStore(ModelCatalog, ProfileCatalog, SettingsStore):
     def ensure_model_path(self, *paths: Path | str) -> Path:
         path = (self._root_path / self._MODELS_DIR).joinpath(*paths)
         if not path.is_file():
-            raise FileNotFoundError(f"Model not found: {path}")
+            raise FileNotFoundError(f"Model file does not exist: {path}")
         return path
 
     def load_profile(self, name: str) -> Profile:
         path = self._profiles_path / name
         if not path.is_dir():
-            raise FileNotFoundError(f"Profile not found: {path}")
+            raise FileNotFoundError(f"Profile directory does not exist: {path}")
         return Profile.load_from_directory(path)
 
     def list_profiles(self) -> list[Profile]:
         if not self._profiles_path.is_dir():
-            raise FileNotFoundError(f"Profiles not found: {self._profiles_path}")
+            raise FileNotFoundError(
+                f"Profiles directory does not exist: {self._profiles_path}"
+            )
 
         return [
             Profile.load_from_directory(path)
@@ -43,7 +45,7 @@ class LocalStore(ModelCatalog, ProfileCatalog, SettingsStore):
     def load_settings(self) -> Settings:
         path = self._root_path / self._SETTINGS_FILE
         if not path.is_file():
-            raise FileNotFoundError(f"Settings not found: {path}")
+            raise FileNotFoundError(f"Settings file does not exist: {path}")
         return Settings.load_from_file(path)
 
     @property

@@ -21,7 +21,7 @@ class TranscriptionService(AbstractAsyncService):
 
     async def transcribe(self, frame: AudioFrame) -> AsyncIterator[Transcription]:
         if self._transcribe_future is not None:
-            raise RuntimeError("Transcribe is already running")
+            raise RuntimeError("Speech transcription is already in progress")
 
         loop = asyncio.get_event_loop()
         responses = asyncio.Queue()

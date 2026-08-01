@@ -6,7 +6,9 @@ from .config import SegmentationSettings
 from .domain import SpeechSegment
 
 
-class SegmentationService:
+class UtteranceSegmenter:
+    """Assemble VAD-labelled frames into bounded utterances with pre-roll."""
+
     def __init__(
         self,
         settings: SegmentationSettings | None = None,
@@ -23,6 +25,8 @@ class SegmentationService:
         self._start_speech_frames = 0
         self._start_silence_frames = 0
         self._end_silence_frames = 0
+        self._speech_frames = 0
+        self._utterance_frames = 0
 
     def feed(
         self,
@@ -49,6 +53,8 @@ class SegmentationService:
         self._start_speech_frames = 0
         self._start_silence_frames = 0
         self._end_silence_frames = 0
+        self._speech_frames = 0
+        self._utterance_frames = 0
 
     def _feed(
         self,
@@ -62,6 +68,8 @@ class SegmentationService:
                 self._start_speech_frames += 1
                 if self._start_speech_frames >= self._settings.min_start_speech_frames:
                     self._speech_started = True
+                    self._speech_frames = self._start_speech_frames
+                    self._utterance_frames = len(self._pending_frames)
                     self._start_silence_frames = 0
                     for pending_frame in self._pending_frames:
                         self._buffer.append(pending_frame)
@@ -76,12 +84,20 @@ class SegmentationService:
             return False
 
         self._buffer.append(chunk.audio)
+        self._utterance_frames += 1
 
         if chunk.is_speech:
+            self._speech_frames += 1
             self._end_silence_frames = 0
         else:
             self._end_silence_frames += 1
-            if self._end_silence_frames > self._settings.max_end_silence_frames:
+            if self._end_silence_frames >= self._end_silence_limit:
                 return True
 
-        return False
+        return self._utterance_frames >= self._settings.max_utterance_frames
+
+    @property
+    def _end_silence_limit(self) -> int:
+        if self._speech_frames < self._settings.short_utterance_speech_frames:
+            return self._settings.short_utterance_end_silence_frames
+        return self._settings.max_end_silence_frames

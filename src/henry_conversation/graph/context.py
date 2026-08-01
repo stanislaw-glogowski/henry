@@ -10,8 +10,6 @@ type ConversationRuntime = Runtime[ConversationContext]
 @dataclass(frozen=True, slots=True)
 class ConversationContext:
     model: str
-    name: str
-    language: str
     recent_messages: int
     system_prompt: str
     opening_prompt: str
@@ -19,14 +17,10 @@ class ConversationContext:
 
     @staticmethod
     def from_profile(
-        name: str,
-        language: str,
         profile: ConversationProfile,
     ) -> ConversationContext:
         return ConversationContext(
             model=profile.model,
-            name=name,
-            language=language,
             recent_messages=profile.recent_messages,
             system_prompt=profile.prompts.system,
             opening_prompt=profile.prompts.opening,

@@ -1,8 +1,12 @@
+from .adapters import get_audio_driver
+from .buffer import AudioBuffer
 from .config import AudioSettings
 from .domain import (
-    AudioBuffer,
+    AudioDevice,
+    AudioDevices,
     AudioFormat,
     AudioFrame,
+    AudioPlaybackOutcome,
     AudioSamples,
 )
 from .ports import (
@@ -10,21 +14,19 @@ from .ports import (
     AudioInput,
     AudioOutput,
 )
-
-
-def get_audio_driver(settings: AudioSettings) -> AudioDriver:
-    from .adapters import get_audio_driver as create_audio_driver
-
-    return create_audio_driver(settings)
-
+from .resampler import AudioResampler
 
 __all__ = [
     "AudioBuffer",
+    "AudioDevice",
+    "AudioDevices",
     "AudioDriver",
     "AudioFormat",
     "AudioFrame",
     "AudioInput",
     "AudioOutput",
+    "AudioPlaybackOutcome",
+    "AudioResampler",
     "AudioSamples",
     "AudioSettings",
     "get_audio_driver",

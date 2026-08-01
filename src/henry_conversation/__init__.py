@@ -8,22 +8,24 @@ if TYPE_CHECKING:
     from .graph import ConversationContext
 
 from .events import (
+    CancelReply,
     ConversationActivated,
     GenerateReply,
     ReplyChunk,
-    ReplyCompleted,
-    ReplyLine,
-    ReplyStarted,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
 
 __all__ = [
+    "CancelReply",
     "ConversationActivated",
     "GenerateReply",
     "ReplyChunk",
-    "ReplyCompleted",
-    "ReplyLine",
-    "ReplyStarted",
+    "ReplyGenerationCompleted",
+    "ReplyGenerationStarted",
+    "ReplyPhrase",
     "UserTurn",
     "run_conversation_worker",
 ]

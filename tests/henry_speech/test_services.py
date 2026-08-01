@@ -5,7 +5,13 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 
-from henry_speech.audio import AudioFormat, AudioFrame, AudioInput, AudioOutput
+from henry_speech.audio import (
+    AudioFormat,
+    AudioFrame,
+    AudioInput,
+    AudioOutput,
+    AudioPlaybackOutcome,
+)
 from henry_speech.capture import (
     CaptureService,
     DetectionResult,
@@ -137,8 +143,18 @@ class FakeAudioOutput(AudioOutput):
         self.frames: list[AudioFrame] = []
         self.calls: list[str] = []
 
-    def write(self, frame: AudioFrame) -> None:
+    def write(self, frame: AudioFrame) -> AudioPlaybackOutcome:
         self.frames.append(frame)
+        return AudioPlaybackOutcome.PLAYED
+
+    def interrupt(self) -> None:
+        self.calls.append("interrupt")
+
+    def duck(self) -> None:
+        self.calls.append("duck")
+
+    def restore(self) -> None:
+        self.calls.append("restore")
 
     def open(self) -> None:
         self.calls.append("open")
@@ -162,7 +178,7 @@ def test_capture_service_lifecycle_detection_and_errors() -> None:
             assert captured.vad.detected
             assert captured.wakeword.detected
             assert "reset" in wakeword.calls
-            with pytest.raises(RuntimeError, match="already running"):
+            with pytest.raises(RuntimeError, match="already in progress"):
                 await service.capture().__anext__()
             await stream.aclose()
             service.disable_wakeword()
@@ -223,8 +239,11 @@ def test_synthesis_and_playback_services() -> None:
         output = FakeAudioOutput()
         playback = PlaybackService(output)
         async with playback:
-            await playback.play(frame)
+            assert await playback.play(frame) is AudioPlaybackOutcome.PLAYED
+            await playback.duck()
+            await playback.restore()
+            await playback.interrupt()
         assert output.frames == [frame]
-        assert output.calls == ["open", "close"]
+        assert output.calls == ["open", "duck", "restore", "interrupt", "close"]
 
     asyncio.run(scenario())

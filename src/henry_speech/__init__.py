@@ -20,14 +20,14 @@ async def run_speech_worker(
     from .audio import get_audio_driver
     from .capture import CaptureService, get_vad_model, get_wakeword_model
     from .playback import PlaybackService
-    from .segmentation import SegmentationService
+    from .segmentation import UtteranceSegmenter
     from .synthesis import SynthesisService, get_tts_model
     from .transcription import TranscriptionService, get_stt_model
     from .worker import Worker
 
     with get_audio_driver(settings.audio) as audio_driver:
-        audio_input = audio_driver.get_input()
-        audio_output = audio_driver.get_output()
+        audio_input = audio_driver.input
+        audio_output = audio_driver.output
         vad_model = get_vad_model(
             model_catalog,
             settings.vad,
@@ -55,7 +55,7 @@ async def run_speech_worker(
             playback_service=PlaybackService(
                 audio_output=audio_output,
             ),
-            segmentation_service=SegmentationService(
+            utterance_segmenter=UtteranceSegmenter(
                 settings=settings.segmentation,
             ),
             synthesis_service=SynthesisService(

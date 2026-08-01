@@ -11,12 +11,13 @@ from pydantic import ValidationError
 import henry_conversation.graph.nodes as nodes_module
 from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation import (
+    CancelReply,
     ConversationActivated,
     GenerateReply,
     ReplyChunk,
-    ReplyCompleted,
-    ReplyLine,
-    ReplyStarted,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
     run_conversation_worker,
 )
@@ -26,6 +27,7 @@ from henry_conversation.graph import (
     ConversationGraph,
     ConversationNodes,
 )
+from henry_conversation.reply_segmentation import ReplySegmenter
 from henry_conversation.worker import Worker
 
 
@@ -34,30 +36,28 @@ def context() -> ConversationContext:
         model="test:model",
         recent_messages=4,
         prompts=ConversationPrompts(
-            system="System {name} {language} {conversation_summary}",
-            opening=(
-                "Opening {name} {language} {conversation_summary} {recent_conversation}"
-            ),
+            system="System Polish {conversation_summary}",
+            opening="Opening Polish {conversation_summary} {recent_conversation}",
             summary="Summary {conversation_summary} {recent_conversation}",
         ),
     )
-    return ConversationContext.from_profile("Henry", "Polish", profile)
+    return ConversationContext.from_profile(profile)
 
 
 def test_config_context_and_events() -> None:
     value = context()
     assert value.model == "test:model"
-    assert value.name == "Henry"
     assert value.recent_messages == 4
 
     activation = ConversationActivated()
     turn = UserTurn("Hello")
     assert GenerateReply(activation).input == activation
     assert GenerateReply(turn).input == turn
+    assert CancelReply() == CancelReply()
     assert ReplyChunk("a").text == "a"
-    assert ReplyLine("line").text == "line"
-    assert ReplyStarted() == ReplyStarted()
-    assert ReplyCompleted() == ReplyCompleted()
+    assert ReplyPhrase("line").text == "line"
+    assert ReplyGenerationStarted() == ReplyGenerationStarted()
+    assert ReplyGenerationCompleted() == ReplyGenerationCompleted()
 
     with pytest.raises(ValidationError):
         ConversationProfile(
@@ -65,6 +65,41 @@ def test_config_context_and_events() -> None:
             recent_messages=1,
             prompts=ConversationPrompts(system="s", opening="o", summary="m"),
         )
+
+
+def test_reply_segmenter_emits_natural_phrases() -> None:
+    segmenter = ReplySegmenter(soft_limit=20, hard_limit=40)
+
+    assert segmenter.feed("Tak. Kolejna wartość to 3.14, a np.") == (
+        "Tak.",
+        "Kolejna wartość to 3.14,",
+    )
+    assert segmenter.feed(" ten skrót nie kończy zdania. ") == (
+        "a np. ten skrót nie kończy zdania.",
+    )
+    assert segmenter.feed("To bardzo długa fraza, którą można już wypowiedzieć") == (
+        "To bardzo długa fraza,",
+    )
+    assert segmenter.flush() == ("którą można już wypowiedzieć",)
+
+
+def test_reply_segmenter_handles_newlines_quotes_limits_and_validation() -> None:
+    segmenter = ReplySegmenter(soft_limit=10, hard_limit=12)
+
+    assert segmenter.feed('"Gotowe!"\nNastępna długa fraza bez końca') == (
+        '"Gotowe!"',
+        "Następna długa",
+    )
+    assert segmenter.flush() == ("fraza bez końca",)
+
+    protected = ReplySegmenter()
+    assert protected.feed("Model U.S. działa przy wersji 3.14 i nazwie x.y") == ()
+    assert protected.flush() == ("Model U.S. działa przy wersji 3.14 i nazwie x.y",)
+
+    with pytest.raises(ValueError, match="limits"):
+        ReplySegmenter(soft_limit=10, hard_limit=5)
+    with pytest.raises(ValueError, match="limits"):
+        ReplySegmenter(soft_limit=0)
 
 
 def test_nodes_build_prompts_and_cache_models(
@@ -93,7 +128,7 @@ def test_nodes_build_prompts_and_cache_models(
 
         assert opening["messages"][0].text == "Opening"
         assert reply["messages"][0].text == "Reply"
-        assert summary == {"summary": "New summary"}
+        assert summary == {"summary": "New summary", "delivery_context": ""}
         assert created == [
             (
                 "test:model",
@@ -219,7 +254,10 @@ def test_worker_streams_activation_turn_chunks_and_lines() -> None:
         compiled = FakeCompiled()
         worker = Worker(bus, FakeGraph(compiled), context())
         with bus.subscribe(
-            ReplyStarted, ReplyChunk, ReplyLine, ReplyCompleted
+            ReplyGenerationStarted,
+            ReplyChunk,
+            ReplyPhrase,
+            ReplyGenerationCompleted,
         ) as replies:
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
@@ -229,19 +267,20 @@ def test_worker_streams_activation_turn_chunks_and_lines() -> None:
             for _ in first:
                 replies.task_done()
             assert first == [
-                ReplyStarted(),
+                ReplyGenerationStarted(),
                 ReplyChunk("Hello\n"),
-                ReplyLine("Hello"),
+                ReplyPhrase("Hello"),
                 ReplyChunk("world"),
-                ReplyLine("world"),
+                ReplyPhrase("world"),
             ]
             completed = await asyncio.wait_for(replies.__anext__(), 1)
             replies.task_done()
-            assert completed == ReplyCompleted()
+            assert completed == ReplyGenerationCompleted()
 
             bus.publish(GenerateReply(UserTurn("Question")))
             while not isinstance(
-                await asyncio.wait_for(replies.__anext__(), 1), ReplyCompleted
+                await asyncio.wait_for(replies.__anext__(), 1),
+                ReplyGenerationCompleted,
             ):
                 replies.task_done()
             replies.task_done()
@@ -250,6 +289,7 @@ def test_worker_streams_activation_turn_chunks_and_lines() -> None:
             await asyncio.wait_for(task, 1)
 
         assert compiled.calls[0]["input"] == {
+            "delivery_context": "",
             "input_kind": "activation",
             "messages": [],
         }
@@ -266,13 +306,19 @@ def test_worker_completes_failed_graph_request() -> None:
         worker = Worker(
             bus, FakeGraph(FakeCompiled(error=RuntimeError("graph"))), context()
         )
-        with bus.subscribe(ReplyStarted, ReplyCompleted) as replies:
+        with bus.subscribe(ReplyGenerationStarted, ReplyGenerationCompleted) as replies:
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
             bus.publish(GenerateReply(UserTurn("Question")))
-            assert await asyncio.wait_for(replies.__anext__(), 1) == ReplyStarted()
+            assert (
+                await asyncio.wait_for(replies.__anext__(), 1)
+                == ReplyGenerationStarted()
+            )
             replies.task_done()
-            assert await asyncio.wait_for(replies.__anext__(), 1) == ReplyCompleted()
+            assert (
+                await asyncio.wait_for(replies.__anext__(), 1)
+                == ReplyGenerationCompleted()
+            )
             replies.task_done()
             with pytest.raises(ExceptionGroup) as raised:
                 await asyncio.wait_for(task, 1)
@@ -280,6 +326,77 @@ def test_worker_completes_failed_graph_request() -> None:
                 isinstance(error, RuntimeError) and str(error) == "graph"
                 for error in raised.value.exceptions
             )
+
+    asyncio.run(scenario())
+
+
+def test_worker_cancels_active_reply() -> None:
+    class BlockingCompiled(FakeCompiled):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def astream(self, **kwargs: Any) -> AsyncIterator[tuple[Any, dict]]:
+            self.calls.append(kwargs)
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled.set()
+            if False:
+                yield AIMessageChunk(""), {}
+
+    async def scenario() -> None:
+        bus = EventBus()
+        compiled = BlockingCompiled()
+        worker = Worker(bus, FakeGraph(compiled), context())
+
+        with bus.subscribe(ReplyGenerationStarted, ReplyGenerationCompleted) as replies:
+            task = asyncio.create_task(worker.run())
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
+            bus.publish(GenerateReply(UserTurn("Question")))
+            assert (
+                await asyncio.wait_for(replies.__anext__(), 1)
+                == ReplyGenerationStarted()
+            )
+            replies.task_done()
+            await asyncio.wait_for(compiled.started.wait(), 1)
+
+            bus.publish(CancelReply("Delivered phrase."))
+            await asyncio.wait_for(compiled.cancelled.wait(), 1)
+            assert (
+                await asyncio.wait_for(replies.__anext__(), 1)
+                == ReplyGenerationCompleted()
+            )
+            replies.task_done()
+            assert worker._delivery_context.startswith(
+                "The previous answer was interrupted"
+            )
+            assert "Delivered phrase." in worker._delivery_context
+
+            bus.publish(ShutdownEvent())
+            await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())
+
+
+def test_worker_cancels_queued_reply() -> None:
+    async def scenario() -> None:
+        worker = Worker(EventBus(), FakeGraph(FakeCompiled()), context())
+        worker._graph_queue.put_nowait(UserTurn("Obsolete"))
+
+        await worker._cancel_reply("")
+
+        assert worker._graph_queue.empty()
+        await asyncio.wait_for(worker._graph_queue.join(), 1)
+        assert "before any part was delivered" in worker._delivery_context
+        await worker._stream(UserTurn("Next"))
+        assert (
+            "before any part was delivered"
+            in worker._graph.compiled.calls[0]["input"]["delivery_context"]
+        )
+        assert worker._delivery_context == ""
 
     asyncio.run(scenario())
 

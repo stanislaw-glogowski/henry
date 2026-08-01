@@ -20,7 +20,7 @@ class SynthesisService(AbstractAsyncService):
 
     async def synthesize(self, text: str) -> AsyncIterator[AudioFrame]:
         if self._synthesize_future is not None:
-            raise RuntimeError("Synthesize is already running")
+            raise RuntimeError("Speech synthesis is already in progress")
 
         loop = asyncio.get_event_loop()
         responses = asyncio.Queue()
@@ -47,6 +47,11 @@ class SynthesisService(AbstractAsyncService):
                     responses.task_done()
         finally:
             await self._cancel_synthesize()
+
+    def interrupt(self) -> None:
+        """Request cancellation of the active synthesis operation."""
+        if self._synthesize_future is not None:
+            self._synthesize_cancel.set()
 
     def _run_synthesize(
         self,

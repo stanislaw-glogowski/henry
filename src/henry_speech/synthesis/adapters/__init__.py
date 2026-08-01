@@ -1,5 +1,8 @@
-from ..config import TTSProfile, TTSSettings
-from ..ports import TTSModel
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import TTSProfile, TTSSettings
+    from ..ports import TTSModel
 
 
 def get_tts_model(
@@ -8,8 +11,12 @@ def get_tts_model(
 ) -> TTSModel:
     match settings.adapter:
         case "piper":
-            from .piper import PiperModel
+            from .piper import PiperTTSModel
 
-            return PiperModel(profile)
+            return PiperTTSModel(profile)
+        case "mlx:chatterbox":
+            from .mlx_audio.chatterbox import ChatterboxTTSModel
+
+            return ChatterboxTTSModel(profile)
         case _:
-            raise ValueError(f"Unknown TTS adapter: {settings.adapter}")
+            raise ValueError(f"Unsupported TTS adapter: {settings.adapter!r}")

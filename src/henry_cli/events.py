@@ -4,20 +4,21 @@ from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation.events import (
     ConversationActivated,
     GenerateReply,
-    ReplyCompleted,
-    ReplyLine,
-    ReplyStarted,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
-from henry_speech.events import WakeWordObserved
+from henry_speech.events import InteractionTimingObserved, WakeWordObserved
 
 
 async def run_event_logger(event_bus: EventBus) -> None:
     with event_bus.subscribe(
         GenerateReply,
-        ReplyStarted,
-        ReplyLine,
-        ReplyCompleted,
+        ReplyGenerationStarted,
+        ReplyPhrase,
+        ReplyGenerationCompleted,
+        InteractionTimingObserved,
         WakeWordObserved,
         ShutdownEvent,
     ) as events:
@@ -28,12 +29,18 @@ async def run_event_logger(event_bus: EventBus) -> None:
                         logger.info("Wake word activated the conversation")
                     case GenerateReply(UserTurn(text)):
                         logger.info("User: {}", text)
-                    case ReplyStarted():
+                    case ReplyGenerationStarted():
                         logger.debug("Generating response")
-                    case ReplyLine(text):
+                    case ReplyPhrase(text):
                         logger.info("Henry: {}", text)
-                    case ReplyCompleted():
+                    case ReplyGenerationCompleted():
                         logger.debug("Response completed")
+                    case InteractionTimingObserved(stage, elapsed_ms):
+                        logger.debug(
+                            "Interaction timing: stage='{}', elapsed_ms={:.1f}",
+                            stage,
+                            elapsed_ms,
+                        )
                     case WakeWordObserved(detected=True):
                         logger.debug("Wake word detected")
                     case ShutdownEvent():

@@ -1,29 +1,74 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Literal
+from enum import Enum, auto
+from time import perf_counter_ns
 
 from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation.events import (
+    CancelReply,
     ConversationActivated,
     GenerateReply,
-    ReplyCompleted,
-    ReplyLine,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
 
-from .audio import AudioFrame
+from .audio import AudioFrame, AudioPlaybackOutcome
 from .capture import CaptureService, SpeechChunk
-from .events import SpeechChunkCaptured, VADObserved, WakeWordObserved
+from .events import (
+    InteractionStage,
+    InteractionTimingObserved,
+    SpeechChunkCaptured,
+    TranscriptionProgressObserved,
+    VADObserved,
+    WakeWordObserved,
+)
 from .playback import PlaybackService
-from .segmentation import SegmentationService, SpeechSegment
+from .segmentation import SpeechSegment, UtteranceSegmenter
 from .synthesis import SynthesisService
-from .transcription import TranscriptionChunk, TranscriptionService, TranscriptionText
+from .transcription import (
+    TranscriptionChunk,
+    TranscriptionService,
+    TranscriptionText,
+    TurnEndpointDetector,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class WorkerOptions:
+    """Frame-based voice-session thresholds for the 16 kHz capture stream."""
+
     wakeword_disabled: bool = False
+    barge_in_speech_frames: int = 6
+    continuation_silence_frames: int = 38
+
+    def __post_init__(self) -> None:
+        if self.barge_in_speech_frames <= 0:
+            raise ValueError(
+                "barge_in_speech_frames must be positive; "
+                f"got {self.barge_in_speech_frames}"
+            )
+        if self.continuation_silence_frames <= 0:
+            raise ValueError(
+                "continuation_silence_frames must be positive; "
+                f"got {self.continuation_silence_frames}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class _ReplyPhraseBoundary:
+    text: str
+
+
+type _PlaybackItem = AudioFrame | _ReplyPhraseBoundary
+
+
+class _PlaybackControl(Enum):
+    DUCK = auto()
+    RESTORE = auto()
+    INTERRUPT = auto()
 
 
 class Worker(Component):
@@ -31,7 +76,7 @@ class Worker(Component):
         self,
         event_bus: EventBus,
         capture_service: CaptureService,
-        segmentation_service: SegmentationService,
+        utterance_segmenter: UtteranceSegmenter,
         transcription_service: TranscriptionService,
         synthesis_service: SynthesisService,
         playback_service: PlaybackService,
@@ -46,21 +91,34 @@ class Worker(Component):
         self._capture_service = capture_service
 
         self._segmentation_queue: asyncio.Queue[SpeechSegment] = asyncio.Queue()
-        self._segmentation_service = segmentation_service
+        self._utterance_segmenter = utterance_segmenter
 
         self._transcription_service = transcription_service
+        self._turn_endpoint_detector = TurnEndpointDetector()
+        self._pending_turn_text = ""
+        self._pending_turn_silence_frames = 0
+        self._pending_turn_continuation = False
 
         self._synthesis_service = synthesis_service
         self._synthesis_queue: asyncio.Queue[str] = asyncio.Queue()
 
         self._playback_service = playback_service
-        self._playback_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
+        self._playback_queue: asyncio.Queue[_PlaybackItem] = asyncio.Queue()
+        self._delivered_phrases: list[str] = []
 
         self._shutdown_event = asyncio.Event()
 
-        self._recording = False
         self._listening = False
-        self._pending_ops = 0
+        self._reply_active = False
+        self._accept_reply_phrases = False
+        self._synthesis_active = False
+        self._playback_active = False
+        self._interrupting = False
+        self._barge_in_speech_frames = 0
+        self._duck_requested = False
+        self._playback_control_queue: asyncio.Queue[_PlaybackControl] = asyncio.Queue()
+        self._interaction_started_ns: int | None = None
+        self._observed_timing_stages: set[InteractionStage] = set()
 
         self._logger.debug("INITIALIZED")
 
@@ -73,7 +131,6 @@ class Worker(Component):
         ):
             self._logger.debug("Starting tasks")
 
-            self._set_recording(True)
             self._set_listening(not self._options.wakeword_disabled)
 
             async with asyncio.TaskGroup() as group:
@@ -84,6 +141,7 @@ class Worker(Component):
                     group.create_task(self._transcription_loop()),
                     group.create_task(self._synthesis_loop()),
                     group.create_task(self._playback_loop()),
+                    group.create_task(self._playback_control_loop()),
                 ]
 
                 await self._shutdown_event.wait()
@@ -104,32 +162,38 @@ class Worker(Component):
                 WakeWordObserved.from_chunk(chunk),
             )
 
-            if not self._recording:
-                continue
-
             if not self._listening:
+                self._observe_pending_turn(chunk)
                 self._capture_queue.put_nowait(chunk)
+                self._observe_barge_in(chunk)
                 continue
 
             if chunk.is_wakeword:
                 self._set_listening(False)
-                self._inc_pending_ops()
+                self._start_interaction()
+                self._prepare_for_reply()
                 self._event_bus.publish(GenerateReply(ConversationActivated()))
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(
-            ReplyLine,
-            ReplyCompleted,
+            ReplyPhrase,
+            ReplyGenerationCompleted,
+            ReplyGenerationStarted,
             ShutdownEvent,
         ) as events:
             async for event in events:
                 try:
                     match event:
-                        case ReplyLine():
-                            self._inc_pending_ops()
-                            self._synthesis_queue.put_nowait(event.text)
-                        case ReplyCompleted():
-                            self._dec_pending_ops()
+                        case ReplyGenerationStarted():
+                            if not self._interrupting:
+                                self._prepare_for_reply()
+                                self._observe_timing("reply_started")
+                        case ReplyPhrase():
+                            if self._accept_reply_phrases:
+                                self._observe_timing("first_reply_phrase")
+                                self._synthesis_queue.put_nowait(event.text)
+                        case ReplyGenerationCompleted():
+                            self._reply_active = False
                         case ShutdownEvent():
                             self._shutdown_event.set()
                 finally:
@@ -140,9 +204,10 @@ class Worker(Component):
             speech_chunk = await self._capture_queue.get()
 
             try:
-                detected, speech_segment = self._segmentation_service.feed(speech_chunk)
+                detected, speech_segment = self._utterance_segmenter.feed(speech_chunk)
                 if detected and speech_segment:
-                    self._inc_pending_ops()
+                    if not self._pending_turn_text:
+                        self._start_interaction()
                     self._segmentation_queue.put_nowait(speech_segment)
             finally:
                 self._capture_queue.task_done()
@@ -151,21 +216,30 @@ class Worker(Component):
         while not self._shutdown_event.is_set():
             speech_segment = await self._segmentation_queue.get()
             try:
+                partial_text = ""
                 async for item in self._transcription_service.transcribe(
                     speech_segment.audio
                 ):
                     match item:
                         case None:
-                            pass
+                            self._pending_turn_continuation = False
+                            self._pending_turn_silence_frames = 0
                         case TranscriptionChunk():
-                            pass
-                        case TranscriptionText():
-                            self._inc_pending_ops()
+                            partial_text += item.content
                             self._event_bus.publish(
-                                GenerateReply(UserTurn(item.content))
+                                TranscriptionProgressObserved(
+                                    content=partial_text,
+                                    likely_complete=(
+                                        self._turn_endpoint_detector.is_complete(
+                                            partial_text
+                                        )
+                                    ),
+                                )
                             )
+                        case TranscriptionText():
+                            self._observe_timing("transcription_completed")
+                            self._handle_transcription(item.content)
             finally:
-                self._dec_pending_ops()
                 self._segmentation_queue.task_done()
 
     async def _synthesis_loop(self) -> None:
@@ -173,22 +247,57 @@ class Worker(Component):
             text = await self._synthesis_queue.get()
 
             try:
+                self._synthesis_active = True
+                produced_audio = False
                 async for chunk in self._synthesis_service.synthesize(text):
-                    self._inc_pending_ops()
+                    if not self._accept_reply_phrases:
+                        break
+                    produced_audio = True
+                    self._observe_timing("first_audio_synthesized")
                     self._playback_queue.put_nowait(chunk)
+                if produced_audio and self._accept_reply_phrases:
+                    # A phrase is delivered only after every preceding audio
+                    # frame has completed on the sequential playback queue.
+                    self._playback_queue.put_nowait(_ReplyPhraseBoundary(text))
             finally:
-                self._dec_pending_ops()
+                self._synthesis_active = False
                 self._synthesis_queue.task_done()
 
     async def _playback_loop(self) -> None:
         while not self._shutdown_event.is_set():
-            frame = await self._playback_queue.get()
+            item = await self._playback_queue.get()
 
             try:
-                await self._playback_service.play(frame)
+                if not self._accept_reply_phrases:
+                    continue
+                match item:
+                    case AudioFrame():
+                        self._playback_active = True
+                        self._observe_timing("playback_started")
+                        outcome = await self._playback_service.play(item)
+                        if outcome is AudioPlaybackOutcome.INTERRUPTED:
+                            self._accept_reply_phrases = False
+                    case _ReplyPhraseBoundary(text):
+                        self._delivered_phrases.append(text)
             finally:
-                self._dec_pending_ops()
+                self._playback_active = False
                 self._playback_queue.task_done()
+
+    async def _playback_control_loop(self) -> None:
+        while not self._shutdown_event.is_set():
+            control = await self._playback_control_queue.get()
+            try:
+                match control:
+                    case _PlaybackControl.DUCK:
+                        await self._playback_service.duck()
+                    case _PlaybackControl.RESTORE:
+                        await self._playback_service.restore()
+                    case _PlaybackControl.INTERRUPT:
+                        await self._playback_service.interrupt()
+                        await self._playback_service.restore()
+                        self._observe_timing("playback_interrupted")
+            finally:
+                self._playback_control_queue.task_done()
 
     def _set_listening(self, enabled: bool) -> None:
         self._listening = enabled
@@ -199,22 +308,114 @@ class Worker(Component):
             self._logger.debug("Listening DISABLED")
             self._capture_service.disable_wakeword()
 
-    def _set_recording(self, enabled: bool) -> None:
-        self._recording = enabled
-        if enabled:
-            self._logger.debug("Recording ENABLED")
-        else:
-            self._logger.debug("Recording DISABLED")
-            self._segmentation_service.reset()
+    def _prepare_for_reply(self) -> None:
+        self._reply_active = True
+        self._accept_reply_phrases = True
+        self._interrupting = False
+        self._barge_in_speech_frames = 0
+        self._duck_requested = False
+        self._delivered_phrases.clear()
 
-    def _inc_pending_ops(self) -> None:
-        self._update_pending_ops(1)
+    def _observe_barge_in(self, chunk: SpeechChunk) -> None:
+        if not self._assistant_active or self._interrupting:
+            self._barge_in_speech_frames = 0
+            return
 
-    def _dec_pending_ops(self) -> None:
-        self._update_pending_ops(-1)
+        if not chunk.is_speech:
+            self._barge_in_speech_frames = 0
+            if self._duck_requested:
+                self._duck_requested = False
+                self._playback_control_queue.put_nowait(_PlaybackControl.RESTORE)
+            return
 
-    def _update_pending_ops(self, delta: Literal[1, -1]) -> None:
-        self._pending_ops += delta
-        recording = self._pending_ops == 0
-        if recording != self._recording:
-            self._set_recording(recording)
+        if not self._duck_requested:
+            self._duck_requested = True
+            self._playback_control_queue.put_nowait(_PlaybackControl.DUCK)
+        self._barge_in_speech_frames += 1
+        if self._barge_in_speech_frames < self._options.barge_in_speech_frames:
+            return
+
+        self._interrupting = True
+        self._observe_timing("barge_in_detected")
+        self._accept_reply_phrases = False
+        self._reply_active = False
+        self._synthesis_service.interrupt()
+        self._drain(self._synthesis_queue)
+        self._drain(self._playback_queue)
+        self._event_bus.publish(CancelReply(" ".join(self._delivered_phrases)))
+        self._duck_requested = False
+        self._playback_control_queue.put_nowait(_PlaybackControl.INTERRUPT)
+        self._logger.debug("Reply INTERRUPTED")
+
+    def _observe_pending_turn(self, chunk: SpeechChunk) -> None:
+        if not self._pending_turn_text:
+            return
+        if chunk.is_speech:
+            self._pending_turn_continuation = True
+            self._pending_turn_silence_frames = 0
+            return
+        if self._pending_turn_continuation:
+            return
+        self._pending_turn_silence_frames += 1
+        if (
+            self._pending_turn_silence_frames
+            >= self._options.continuation_silence_frames
+        ):
+            self._commit_user_turn(self._pending_turn_text)
+
+    def _handle_transcription(self, text: str) -> None:
+        combined = " ".join(
+            part for part in (self._pending_turn_text, text.strip()) if part
+        )
+        self._pending_turn_continuation = False
+        self._pending_turn_silence_frames = 0
+        if not combined:
+            return
+        if not self._turn_endpoint_detector.is_complete(combined):
+            self._pending_turn_text = combined
+            return
+        self._commit_user_turn(combined)
+
+    def _commit_user_turn(self, text: str) -> None:
+        self._pending_turn_text = ""
+        self._pending_turn_continuation = False
+        self._pending_turn_silence_frames = 0
+        self._prepare_for_reply()
+        self._event_bus.publish(GenerateReply(UserTurn(text)))
+
+    @property
+    def _assistant_active(self) -> bool:
+        return (
+            self._reply_active
+            or self._synthesis_active
+            or self._playback_active
+            or not self._synthesis_queue.empty()
+            or not self._playback_queue.empty()
+        )
+
+    def _start_interaction(self) -> None:
+        self._interaction_started_ns = perf_counter_ns()
+        self._observed_timing_stages.clear()
+        self._observe_timing("turn_ready")
+
+    def _observe_timing(self, stage: InteractionStage) -> None:
+        started_ns = self._interaction_started_ns
+        if started_ns is None or stage in self._observed_timing_stages:
+            return
+        self._observed_timing_stages.add(stage)
+        self._event_bus.publish(
+            InteractionTimingObserved(
+                stage=stage,
+                elapsed_ms=(perf_counter_ns() - started_ns) / 1_000_000,
+            )
+        )
+
+    @staticmethod
+    def _drain(queue: asyncio.Queue) -> None:
+        while True:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            else:
+                queue.task_done()

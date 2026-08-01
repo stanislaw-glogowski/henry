@@ -82,7 +82,7 @@ def test_resource_context_and_bound_logger() -> None:
 def test_async_service_lifecycle_and_executor_ownership() -> None:
     async def scenario() -> None:
         service = Service()
-        with pytest.raises(RuntimeError, match="Executor is not open"):
+        with pytest.raises(RuntimeError, match="is not started"):
             service._require_executor()
 
         async with service as entered:

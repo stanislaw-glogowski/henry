@@ -1,4 +1,6 @@
 import asyncio
+import importlib
+import os
 import runpy
 import signal
 from types import SimpleNamespace
@@ -6,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
+import henry_cli
 import henry_cli.main as main_module
 from henry_cli.events import run_event_logger
 from henry_cli.logger import _ensure_component, configure_console_logger
@@ -13,9 +16,9 @@ from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation import (
     ConversationActivated,
     GenerateReply,
-    ReplyCompleted,
-    ReplyLine,
-    ReplyStarted,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
 from henry_conversation.config import ConversationProfile, ConversationPrompts
@@ -26,12 +29,21 @@ from henry_speech.events import WakeWordObserved
 def profile():
     return SimpleNamespace(
         name="Henry",
-        language="Polish",
         conversation=ConversationProfile(
             model="test:model",
             prompts=ConversationPrompts(system="s", opening="o", summary="m"),
         ),
     )
+
+
+def test_cli_suppresses_unused_pytorch_advisory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TRANSFORMERS_NO_ADVISORY_WARNINGS", raising=False)
+
+    importlib.reload(henry_cli)
+
+    assert os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] == "1"
 
 
 def test_console_logger_adds_default_component() -> None:
@@ -64,9 +76,9 @@ def test_event_logger_reports_conversation_events() -> None:
                 WakeWordObserved(score=0.9, detected=True),
                 GenerateReply(ConversationActivated()),
                 GenerateReply(UserTurn("Question")),
-                ReplyStarted(),
-                ReplyLine("Answer"),
-                ReplyCompleted(),
+                ReplyGenerationStarted(),
+                ReplyPhrase("Answer"),
+                ReplyGenerationCompleted(),
                 ShutdownEvent(),
             )
             await asyncio.wait_for(task, 1)

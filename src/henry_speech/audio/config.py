@@ -4,4 +4,4 @@ from henry_common.validation import ConfigModel
 
 
 class AudioSettings(ConfigModel):
-    driver: Literal["pyaudio"] = "pyaudio"
+    driver: Literal["avfaudio", "pyaudio"] = "avfaudio"

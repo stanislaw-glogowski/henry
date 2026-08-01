@@ -8,10 +8,10 @@ from ....audio import AudioFrame
 from ...config import WakeWordProfile
 from ...domain import DetectionResult
 from ...ports import WakeWordModel
-from .model import BaseModel
+from .onnx_model import OpenWakeWordONNXModel
 
 
-class OpenWakeWordModel(WakeWordModel, BaseModel):
+class OpenWakeWordModel(WakeWordModel, OpenWakeWordONNXModel):
     _MELSPEC_PATH = "melspectrogram.onnx"
     _EMBEDDING_PATH = "embedding_model.onnx"
     _NUM_CPU = 1
@@ -32,7 +32,7 @@ class OpenWakeWordModel(WakeWordModel, BaseModel):
 
     def detect(self, frame: AudioFrame) -> DetectionResult:
         if self._model is None:
-            raise RuntimeError("Model is not loaded")
+            raise RuntimeError("OpenWakeWord model is not loaded")
 
         incoming_samples: NDArray[np.float32] = np.asarray(
             frame.samples,
@@ -97,7 +97,7 @@ class OpenWakeWordModel(WakeWordModel, BaseModel):
 
     def open(self) -> None:
         if self._model is not None:
-            raise RuntimeError("Model is already loaded")
+            raise RuntimeError("OpenWakeWord model is already loaded")
 
         self._logger.debug("Loading model: model_path='{}'", self._model_path.name)
 

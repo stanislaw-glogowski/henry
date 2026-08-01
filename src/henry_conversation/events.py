@@ -22,12 +22,23 @@ class GenerateReply(Event):
 
 
 @dataclass(frozen=True, slots=True)
-class ReplyStarted(Event):
+class CancelReply(Event):
+    """Cancel generation and describe the prefix certainly heard by the user."""
+
+    spoken_text: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyGenerationStarted(Event):
+    """Signal that a finite conversation graph run started generating."""
+
     pass
 
 
 @dataclass(frozen=True, slots=True)
-class ReplyCompleted(Event):
+class ReplyGenerationCompleted(Event):
+    """Signal that generation ended; audio delivery may still be active."""
+
     pass
 
 
@@ -37,5 +48,7 @@ class ReplyChunk(Event):
 
 
 @dataclass(frozen=True, slots=True)
-class ReplyLine(Event):
+class ReplyPhrase(Event):
+    """Complete plain-text phrase ready for independent speech synthesis."""
+
     text: str

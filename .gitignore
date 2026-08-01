@@ -2,17 +2,27 @@
 .agents
 .idea
 .junie
+.DS_Store
 
 # Python
 __pycache__/
 *.py[oc]
+.coverage*
+.pytest_cache/
+.ruff_cache/
 build/
 dist/
 wheels/
 *.egg-info
 .venv
 
+# Native builds
+native/**/.build/
+native/**/.swiftpm/
+
 # Local
 .henry
 .langgraph*
 .env
+.env.*
+!.env.example

@@ -8,6 +8,14 @@ Henry is a local Apple Silicon voice assistant. Preserve explicit boundaries bet
 shared infrastructure, and the CLI composition root. Prefer small, conventional contracts over additional abstraction
 layers.
 
+## Engineering guidelines
+
+Before modifying the codebase, read and follow [ENGINEERING.md](ENGINEERING.md). It defines the repository conventions
+for package boundaries, domain types, ports, adapters, lifecycle, concurrency, naming, testing, and build changes.
+
+When these guidelines conflict with task-specific user instructions, follow the user's explicit scope and preserve
+unrelated changes. The hard architecture, testing, and change-discipline rules in this file remain mandatory.
+
 ## Environment
 
 - Python: 3.14
@@ -20,10 +28,12 @@ layers.
 Use the following verification commands:
 
 ```bash
-UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff check src tests
-UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff format --check src tests pyproject.toml
+UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff check hatch_build.py src tests tools
+UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff format --check hatch_build.py src tests tools pyproject.toml
 UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -q
-UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m compileall -q src tests
+UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m compileall -q hatch_build.py src tests tools
+swift format lint --recursive native/macos/henry-audio
+swift test --package-path native/macos/henry-audio
 UV_CACHE_DIR=/private/tmp/uv-cache uv build
 ```
 
@@ -46,6 +56,15 @@ publishes either `ConversationActivated` or `UserTurn`; it does not choose graph
 activation routes to `opening`, while a user turn routes through `reply` and `summarize`. The graph never waits for the
 next utterance.
 
+Conversation publishes streamed `ReplyChunk` telemetry and complete `ReplyPhrase` values for speech. Reply lifecycle
+events are `ReplyGenerationStarted` and `ReplyGenerationCompleted`; they describe model generation, not audio delivery.
+Speech confirms delivery only after every audio frame for a phrase has played. When interrupted, the next graph run
+receives the conservative prefix that the user certainly heard.
+
+Utterance endpointing has two layers. `UtteranceSegmenter` owns frame-based start, adaptive trailing-silence, pre-roll,
+and maximum-duration rules. `TurnEndpointDetector` may join a semantically incomplete transcription with the next
+utterance; it must not start speculative language-model work.
+
 Conversation history and its summary are mutable graph state. Profile-derived model settings and prompts are immutable
 runtime context. The local CLI uses an in-memory checkpointer and `thread_id="default"`, so history lasts only for the
 current process.
@@ -67,6 +86,11 @@ text in these files rather than Python constants.
 Blocking adapters and ML runtimes must remain in their owning worker threads. Cross the thread/event-loop boundary with
 `queue.Queue` or `loop.call_soon_threadsafe(...)`. Never mutate a thread-owned model directly from the event loop.
 
+The macOS `henry-audio` helper owns one full-duplex `AVAudioEngine` process for capture, playback, Voice Processing,
+gain ducking, and immediate interruption. `AVFAudioDriver` owns that process; its input and output ports have no separate
+device lifecycle. Keep protocol changes synchronized between Swift, Python, the fake helper, tests, and the protocol
+version.
+
 Each successful queue `get()` has exactly one matching `task_done()`, preferably in `finally`. Shutdown must cancel and
 await asyncio tasks before service contexts join their workers.
 
@@ -80,7 +104,7 @@ await asyncio tasks before service contexts join their workers.
 - Synchronize with concrete events, queues, or futures and protect awaits with `asyncio.wait_for(...)`; do not use
   arbitrary sleeps.
 - Cover normal lifecycle, cancellation, startup/runtime error propagation, profile validation, graph routing,
-  checkpoint isolation, and reply line buffering.
+  checkpoint isolation, reply phrase segmentation, semantic continuation, delivery acknowledgement, and barge-in.
 - Treat manual device and model smoke tests as separate evidence from automated tests.
 - `uv run pytest -q` enforces at least 95% combined branch coverage for `henry_cli`, `henry_common`,
   `henry_conversation`, `henry_resources`, and `henry_speech`.
@@ -89,13 +113,24 @@ await asyncio tasks before service contexts join their workers.
 
 Shared fake ports and resources belong in `tests/support.py`.
 
+Voice benchmark source, suites, and documentation belong in `tools/voice_benchmark`
+and `benchmarks/voice`. Generated recordings, model output, ratings, and reports
+belong below `HENRY_HOME/benchmarks`; never commit them. A displayed benchmark
+prompt is ground truth, while model transcription remains a separate result.
+Adapter candidates stay lazy and must not become production defaults before a
+recorded Polish benchmark and, for TTS, a blind listening review.
+
+Swift protocol and value behavior belongs in `native/macos/henry-audio/Tests`. Real microphone, speaker, AEC, gain-ramp,
+Metal, and model validation remains a separate manual gate.
+
 ## Change discipline
 
 - Preserve unrelated user changes and inspect both staged and unstaged state.
-- Do not change wake-word session semantics, timing, the Ollama model, prompts, or audio formats as incidental cleanup.
+- Do not change wake-word session semantics, endpoint timing, the Ollama model, prompts, or audio formats as incidental
+  cleanup.
 - Keep comments and docstrings minimal. Document public contracts, significant constants, and non-obvious concurrency;
   do not narrate straightforward implementation.
-- Keep spoken assistant output plain text and compatible with line-buffered TTS.
+- Keep spoken assistant output plain text and compatible with phrase-streamed TTS.
 - Do not commit `.henry`, downloaded models, caches, generated audio, or secrets.
 
 Before reporting completion, run complete automated verification and list manual hardware or model checks that remain

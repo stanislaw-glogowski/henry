@@ -23,8 +23,6 @@ async def run() -> None:
     profile = local_store.load_profile("default")
     settings = local_store.load_settings()
     conversation_context = ConversationContext.from_profile(
-        profile.name,
-        profile.language,
         profile.conversation,
     )
 

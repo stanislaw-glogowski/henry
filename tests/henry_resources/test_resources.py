@@ -16,7 +16,6 @@ def write_profile(root: Path, name: str = "default") -> Path:
     (profile / "profile.yml").write_text(
         """
 name: Henry
-language: Polish
 conversation:
   model: ollama:gpt-oss:20b
   recent_messages: 6
@@ -24,14 +23,16 @@ wakeword:
   model: wakeword.onnx
 tts:
   model: voice.onnx
+stt:
+  language: pl
 """.strip(),
         encoding="utf-8",
     )
     (prompts / "system.md").write_text(
-        "System {name} {language} {conversation_summary}", encoding="utf-8"
+        "System Polish {conversation_summary}", encoding="utf-8"
     )
     (prompts / "opening.md").write_text(
-        "Open {language} {conversation_summary} {recent_conversation}",
+        "Open Polish {conversation_summary} {recent_conversation}",
         encoding="utf-8",
     )
     (prompts / "summary.md").write_text(
@@ -60,23 +61,25 @@ def test_local_store_loads_profile_settings_and_models(tmp_path: Path) -> None:
 
     assert profile.id == "default"
     assert profile.path == profile_path
+    assert profile.name == "Henry"
+    assert profile.stt.language == "pl"
     assert profile.conversation.recent_messages == 6
     assert profile.conversation.prompts.system.startswith("System")
     assert "id" not in profile.model_dump()
     assert [item.id for item in store.list_profiles()] == ["default", "second"]
-    assert store.load_settings() == Settings()
+    assert store.load_settings() == Settings(speech={"audio": {"driver": "pyaudio"}})
     assert store.ensure_model_path("nested", "model.onnx") == model_path
 
 
 def test_local_store_reports_missing_resources(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    with pytest.raises(FileNotFoundError, match="Model not found"):
+    with pytest.raises(FileNotFoundError, match="Model file does not exist"):
         store.ensure_model_path("missing")
-    with pytest.raises(FileNotFoundError, match="Profile not found"):
+    with pytest.raises(FileNotFoundError, match="Profile directory does not exist"):
         store.load_profile("missing")
-    with pytest.raises(FileNotFoundError, match="Profiles not found"):
+    with pytest.raises(FileNotFoundError, match="Profiles directory does not exist"):
         store.list_profiles()
-    with pytest.raises(FileNotFoundError, match="Settings not found"):
+    with pytest.raises(FileNotFoundError, match="Settings file does not exist"):
         store.load_settings()
 
 
@@ -85,7 +88,7 @@ def test_profile_requires_fixed_prompt_files_and_valid_configuration(
 ) -> None:
     profile_path = write_profile(tmp_path)
     (profile_path / "prompts" / "opening.md").unlink()
-    with pytest.raises(FileNotFoundError, match="opening.md"):
+    with pytest.raises(FileNotFoundError, match=r"opening\.md"):
         Profile.load_from_directory(profile_path)
 
     (profile_path / "prompts" / "opening.md").write_text("open", encoding="utf-8")

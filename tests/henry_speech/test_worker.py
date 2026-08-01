@@ -1,7 +1,5 @@
 import asyncio
-import sys
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
-from types import SimpleNamespace
 from typing import Self
 
 import numpy as np
@@ -9,20 +7,30 @@ import pytest
 
 import henry_speech
 import henry_speech.audio as audio_package
+import henry_speech.audio.adapters as audio_adapters
 import henry_speech.capture as capture_package
+import henry_speech.capture.adapters as capture_adapters
 import henry_speech.synthesis as synthesis_package
+import henry_speech.synthesis.adapters as synthesis_adapters
 import henry_speech.transcription as transcription_package
+import henry_speech.transcription.adapters as transcription_adapters
 from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation import (
+    CancelReply,
     ConversationActivated,
     GenerateReply,
-    ReplyCompleted,
-    ReplyLine,
+    ReplyGenerationCompleted,
+    ReplyGenerationStarted,
+    ReplyPhrase,
     UserTurn,
 )
-from henry_speech.audio import AudioFormat
+from henry_speech.audio import AudioFormat, AudioPlaybackOutcome
 from henry_speech.capture import DetectionResult, SpeechChunk
 from henry_speech.config import SpeechProfile, SpeechSettings
+from henry_speech.events import (
+    InteractionTimingObserved,
+    TranscriptionProgressObserved,
+)
 from henry_speech.segmentation import SpeechSegment
 from henry_speech.synthesis import TTSProfile
 from henry_speech.transcription import TranscriptionChunk, TranscriptionText
@@ -94,8 +102,15 @@ class FakeTranscription(FakeAsyncResource):
 
 
 class FakeSynthesis(FakeAsyncResource):
+    def __init__(self) -> None:
+        super().__init__()
+        self.interrupt_count = 0
+
     async def synthesize(self, text: str):
         yield frame(0.2)
+
+    def interrupt(self) -> None:
+        self.interrupt_count += 1
 
 
 class FakePlayback(FakeAsyncResource):
@@ -103,10 +118,23 @@ class FakePlayback(FakeAsyncResource):
         super().__init__()
         self.frames = []
         self.played = asyncio.Event()
+        self.duck_count = 0
+        self.restore_count = 0
+        self.interrupt_count = 0
 
-    async def play(self, audio) -> None:
+    async def play(self, audio) -> AudioPlaybackOutcome:
         self.frames.append(audio)
         self.played.set()
+        return AudioPlaybackOutcome.PLAYED
+
+    async def interrupt(self) -> None:
+        self.interrupt_count += 1
+
+    async def duck(self) -> None:
+        self.duck_count += 1
+
+    async def restore(self) -> None:
+        self.restore_count += 1
 
 
 def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
@@ -126,18 +154,26 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
             playback,
         )
 
-        with bus.subscribe(GenerateReply) as requests:
+        with (
+            bus.subscribe(GenerateReply) as requests,
+            bus.subscribe(InteractionTimingObserved) as timings,
+        ):
             task = asyncio.create_task(worker.run())
-            await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
-            assert capture.wakeword_enabled
+            await asyncio.wait_for(
+                _wait_until(lambda: capture.entered and capture.wakeword_enabled),
+                1,
+            )
 
             capture.queue.put_nowait(speech_chunk(wakeword=True))
             activation = await asyncio.wait_for(requests.__anext__(), 1)
             requests.task_done()
             assert activation == GenerateReply(ConversationActivated())
             assert not capture.wakeword_enabled
+            first_timing = await asyncio.wait_for(timings.__anext__(), 1)
+            timings.task_done()
+            assert first_timing.stage == "turn_ready"
 
-            bus.publish(ReplyLine("Welcome"), ReplyCompleted())
+            bus.publish(ReplyPhrase("Welcome"), ReplyGenerationCompleted())
             await asyncio.wait_for(playback.played.wait(), 1)
             playback.played.clear()
             assert len(playback.frames) == 1
@@ -147,7 +183,7 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
             requests.task_done()
             assert turn == GenerateReply(UserTurn("Question"))
 
-            bus.publish(ReplyLine("Answer"), ReplyCompleted())
+            bus.publish(ReplyPhrase("Answer"), ReplyGenerationCompleted())
             await asyncio.wait_for(playback.played.wait(), 1)
 
             bus.publish(ShutdownEvent())
@@ -157,7 +193,7 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
             resource.entered and resource.exited
             for resource in (capture, transcription, synthesis, playback)
         )
-        assert segmentation.reset_count >= 1
+        assert segmentation.reset_count == 0
 
     asyncio.run(scenario())
 
@@ -185,6 +221,228 @@ def test_worker_can_start_with_wakeword_disabled() -> None:
     asyncio.run(scenario())
 
 
+def test_worker_interrupts_active_reply_after_sustained_speech() -> None:
+    class NoSegments(FakeSegmentation):
+        def feed(self, chunk: SpeechChunk):
+            return False, None
+
+    async def scenario() -> None:
+        bus = EventBus()
+        capture = FakeCapture()
+        synthesis = FakeSynthesis()
+        playback = FakePlayback()
+        worker = Worker(
+            bus,
+            capture,
+            NoSegments(),
+            FakeTranscription(),
+            synthesis,
+            playback,
+            WorkerOptions(barge_in_speech_frames=3),
+        )
+
+        with bus.subscribe(CancelReply) as cancellations:
+            task = asyncio.create_task(worker.run())
+            await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
+            capture.queue.put_nowait(speech_chunk(wakeword=True))
+            bus.publish(ReplyGenerationStarted(), ReplyPhrase("Welcome"))
+            await asyncio.wait_for(playback.played.wait(), 1)
+            await asyncio.wait_for(
+                _wait_until(lambda: worker._delivered_phrases == ["Welcome"]),
+                1,
+            )
+
+            for _ in range(3):
+                capture.queue.put_nowait(speech_chunk())
+
+            assert await asyncio.wait_for(cancellations.__anext__(), 1) == CancelReply(
+                "Welcome"
+            )
+            cancellations.task_done()
+            await asyncio.wait_for(
+                _wait_until(lambda: playback.interrupt_count == 1),
+                1,
+            )
+            assert playback.duck_count == 1
+            assert playback.restore_count == 1
+            assert synthesis.interrupt_count == 1
+
+            bus.publish(ShutdownEvent())
+            await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())
+
+
+def test_worker_restores_playback_after_false_barge_in() -> None:
+    class NoSegments(FakeSegmentation):
+        def feed(self, chunk: SpeechChunk):
+            return False, None
+
+    async def scenario() -> None:
+        bus = EventBus()
+        capture = FakeCapture()
+        playback = FakePlayback()
+        worker = Worker(
+            bus,
+            capture,
+            NoSegments(),
+            FakeTranscription(),
+            FakeSynthesis(),
+            playback,
+            WorkerOptions(barge_in_speech_frames=3),
+        )
+        task = asyncio.create_task(worker.run())
+        await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
+        await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 1), 1)
+        capture.queue.put_nowait(speech_chunk(wakeword=True))
+        bus.publish(ReplyGenerationStarted(), ReplyPhrase("Welcome"))
+        await asyncio.wait_for(playback.played.wait(), 1)
+
+        capture.queue.put_nowait(speech_chunk())
+        silence = speech_chunk()
+        silence = SpeechChunk(
+            audio=silence.audio,
+            vad=DetectionResult(score=0.1, detected=False),
+            wakeword=None,
+        )
+        capture.queue.put_nowait(silence)
+        await asyncio.wait_for(
+            _wait_until(lambda: playback.restore_count == 1),
+            1,
+        )
+        assert playback.duck_count == 1
+        assert playback.interrupt_count == 0
+
+        bus.publish(ShutdownEvent())
+        await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())
+
+
+def test_worker_options_reject_invalid_barge_in_threshold() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        WorkerOptions(barge_in_speech_frames=0)
+    with pytest.raises(ValueError, match="positive"):
+        WorkerOptions(continuation_silence_frames=0)
+
+
+def test_worker_combines_semantically_incomplete_transcription() -> None:
+    class SpeechOnlySegmentation(FakeSegmentation):
+        def feed(self, chunk: SpeechChunk):
+            if not chunk.is_speech:
+                return False, None
+            return True, SpeechSegment(chunk.audio)
+
+    class SequencedTranscription(FakeAsyncResource):
+        def __init__(self) -> None:
+            super().__init__()
+            self.texts = iter(("Chcę wiedzieć, ponieważ", "to jest ważne."))
+            self.completed: asyncio.Queue[None] = asyncio.Queue()
+
+        async def transcribe(self, audio):
+            text = next(self.texts)
+            yield TranscriptionChunk(text)
+            yield TranscriptionText(text)
+            self.completed.put_nowait(None)
+
+    async def scenario() -> None:
+        bus = EventBus()
+        capture = FakeCapture()
+        transcription = SequencedTranscription()
+        worker = Worker(
+            bus,
+            capture,
+            SpeechOnlySegmentation(),
+            transcription,
+            FakeSynthesis(),
+            FakePlayback(),
+            WorkerOptions(wakeword_disabled=True, continuation_silence_frames=2),
+        )
+        with (
+            bus.subscribe(GenerateReply) as requests,
+            bus.subscribe(TranscriptionProgressObserved) as progress,
+        ):
+            task = asyncio.create_task(worker.run())
+            await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 3), 1)
+            request = asyncio.create_task(requests.__anext__())
+
+            capture.queue.put_nowait(speech_chunk())
+            await asyncio.wait_for(transcription.completed.get(), 1)
+            transcription.completed.task_done()
+            assert not request.done()
+            first_progress = await asyncio.wait_for(progress.__anext__(), 1)
+            progress.task_done()
+            assert not first_progress.likely_complete
+
+            capture.queue.put_nowait(speech_chunk())
+            assert await asyncio.wait_for(request, 1) == GenerateReply(
+                UserTurn("Chcę wiedzieć, ponieważ to jest ważne.")
+            )
+            requests.task_done()
+
+            bus.publish(ShutdownEvent())
+            await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())
+
+
+def test_worker_commits_incomplete_turn_after_silence_limit() -> None:
+    class SpeechOnlySegmentation(FakeSegmentation):
+        def feed(self, chunk: SpeechChunk):
+            if not chunk.is_speech:
+                return False, None
+            return True, SpeechSegment(chunk.audio)
+
+    class IncompleteTranscription(FakeAsyncResource):
+        def __init__(self) -> None:
+            super().__init__()
+            self.completed = asyncio.Event()
+
+        async def transcribe(self, audio):
+            yield TranscriptionChunk("Powiem jeszcze, ale")
+            yield TranscriptionText("Powiem jeszcze, ale")
+            self.completed.set()
+
+    async def scenario() -> None:
+        bus = EventBus()
+        capture = FakeCapture()
+        transcription = IncompleteTranscription()
+        worker = Worker(
+            bus,
+            capture,
+            SpeechOnlySegmentation(),
+            transcription,
+            FakeSynthesis(),
+            FakePlayback(),
+            WorkerOptions(wakeword_disabled=True, continuation_silence_frames=2),
+        )
+        with bus.subscribe(GenerateReply) as requests:
+            task = asyncio.create_task(worker.run())
+            await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
+            capture.queue.put_nowait(speech_chunk())
+            await asyncio.wait_for(transcription.completed.wait(), 1)
+
+            silence = SpeechChunk(
+                audio=frame(0),
+                vad=DetectionResult(score=0.1, detected=False),
+                wakeword=None,
+            )
+            capture.queue.put_nowait(silence)
+            capture.queue.put_nowait(silence)
+            assert await asyncio.wait_for(requests.__anext__(), 1) == GenerateReply(
+                UserTurn("Powiem jeszcze, ale")
+            )
+            requests.task_done()
+
+            bus.publish(ShutdownEvent())
+            await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())
+
+
 async def _wait_until(predicate) -> None:
     while not predicate():
         await asyncio.sleep(0)
@@ -200,12 +458,6 @@ class FakeDriver(AbstractContextManager):
 
     def __exit__(self, *args) -> None:
         pass
-
-    def get_input(self):
-        return self.input
-
-    def get_output(self):
-        return self.output
 
 
 def test_public_speech_runner_composes_services(
@@ -248,47 +500,9 @@ def test_public_speech_runner_composes_services(
     asyncio.run(scenario())
 
 
-def test_lazy_adapter_factories(monkeypatch: pytest.MonkeyPatch) -> None:
-    sentinel = object()
-    modules = {
-        "henry_speech.audio.adapters": SimpleNamespace(
-            get_audio_driver=lambda _: sentinel
-        ),
-        "henry_speech.capture.adapters": SimpleNamespace(
-            get_vad_model=lambda *_: sentinel,
-            get_wakeword_model=lambda *_: sentinel,
-        ),
-        "henry_speech.synthesis.adapters": SimpleNamespace(
-            get_tts_model=lambda *_: sentinel
-        ),
-        "henry_speech.transcription.adapters": SimpleNamespace(
-            get_stt_model=lambda *_: sentinel
-        ),
-    }
-    for name, module in modules.items():
-        monkeypatch.setitem(sys.modules, name, module)
-
-    assert audio_package.get_audio_driver(SpeechSettings().audio) is sentinel
-    assert capture_package.get_vad_model(object(), SpeechSettings().vad) is sentinel
-    assert (
-        capture_package.get_wakeword_model(
-            object(), {"model": "wake.onnx"}, SpeechSettings().wakeword
-        )
-        is sentinel
-    )
-    assert (
-        synthesis_package.get_tts_model(
-            TTSProfile(model="voice.onnx"), SpeechSettings().tts
-        )
-        is sentinel
-    )
-    assert (
-        transcription_package.get_stt_model(
-            SpeechProfile(
-                wakeword={"model": "wake.onnx"},
-                tts={"model": "voice.onnx"},
-            ).stt,
-            SpeechSettings().stt,
-        )
-        is sentinel
-    )
+def test_adapter_factory_exports() -> None:
+    assert audio_package.get_audio_driver is audio_adapters.get_audio_driver
+    assert capture_package.get_vad_model is capture_adapters.get_vad_model
+    assert capture_package.get_wakeword_model is capture_adapters.get_wakeword_model
+    assert synthesis_package.get_tts_model is synthesis_adapters.get_tts_model
+    assert transcription_package.get_stt_model is transcription_adapters.get_stt_model

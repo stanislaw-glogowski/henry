@@ -1,0 +1,42 @@
+id: pl-tts
+description: Polish listening suite for comparing TTS adapters.
+prompts:
+  - id: tts-short-001
+    category: short
+    text: Jasne, już sprawdzam.
+  - id: tts-short-002
+    category: short
+    text: Nie jestem tego pewien.
+  - id: tts-question-001
+    category: question
+    text: Czy chcesz kontynuować ten temat?
+  - id: tts-question-002
+    category: question
+    text: O której godzinie mam ustawić przypomnienie?
+  - id: tts-number-001
+    category: numbers
+    text: Spotkanie rozpocznie się o siedemnastej trzydzieści.
+  - id: tts-number-002
+    category: numbers
+    text: Na zewnątrz są minus cztery stopnie Celsjusza.
+  - id: tts-name-001
+    category: names
+    text: Pociąg z Wrocławia do Białegostoku odjedzie z peronu trzeciego.
+  - id: tts-tech-001
+    category: mixed-technical
+    text: Proces WebSocket działa obok głównego event loopa.
+  - id: tts-tech-002
+    category: mixed-technical
+    text: Model Qwen korzysta z frameworka MLX na Apple Silicon.
+  - id: tts-prosody-001
+    category: prosody
+    text: Poczekaj, proszę. To nie jest jeszcze ostateczny wynik.
+  - id: tts-prosody-002
+    category: prosody
+    text: Naprawdę? Tego się zupełnie nie spodziewałem.
+  - id: tts-prosody-003
+    category: prosody
+    text: Dobra wiadomość jest taka, że wszystko działa poprawnie.
+  - id: tts-long-001
+    category: long-form
+    text: Porównałem dostępne rozwiązania i wygląda na to, że największą poprawę przyniesie skrócenie czasu oczekiwania oraz lepsze rozpoznawanie momentu, w którym kończysz mówić.

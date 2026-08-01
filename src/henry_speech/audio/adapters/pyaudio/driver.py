@@ -1,63 +1,63 @@
 import pyaudio
 
-from ...domain import AudioFormat
+from ...domain import AudioDevice, AudioDevices
 from ...ports import AudioDriver
 from .input import PyAudioInput
 from .output import PyAudioOutput
 
 
 class PyAudioDriver(AudioDriver[PyAudioInput, PyAudioOutput]):
-    _INPUT_FORMAT = AudioFormat(
-        sample_rate=16_000,
-        channels=1,
-    )
-    _INPUT_FRAMES_PER_BUFFER = 512
-    _OUTPUT_FRAMES_PER_BUFFER = 512
-
     def __init__(self) -> None:
         super().__init__()
         self._session: pyaudio.PyAudio | None = None
         self._input: PyAudioInput | None = None
         self._output: PyAudioOutput | None = None
+        self._devices: AudioDevices | None = None
 
-    def get_input(self) -> PyAudioInput:
+    @property
+    def input(self) -> PyAudioInput:
         input = self._input
         if input is None:
-            input = PyAudioInput(
-                session=self._require_session(),
-                format=self._INPUT_FORMAT,
-                frames_per_buffer=self._INPUT_FRAMES_PER_BUFFER,
-            )
-            self._input = input
+            raise RuntimeError("PyAudio driver is not open")
         return input
 
-    def get_output(self) -> PyAudioOutput:
+    @property
+    def output(self) -> PyAudioOutput:
         output = self._output
         if output is None:
-            output = PyAudioOutput(
-                session=self._require_session(),
-                frames_per_buffer=self._OUTPUT_FRAMES_PER_BUFFER,
-            )
-            self._output = output
+            raise RuntimeError("PyAudio driver is not open")
         return output
+
+    @property
+    def devices(self) -> AudioDevices:
+        devices = self._devices
+        if devices is None:
+            raise RuntimeError("PyAudio driver is not open")
+        return devices
 
     def open(self) -> None:
         if self._session is not None:
-            raise RuntimeError("Session is already open")
+            raise RuntimeError("PyAudio session is already open")
 
-        self._session = pyaudio.PyAudio()
-
-        self._logger.debug("Session OPENED")
-
-        assert self._session is not None
-
-        input_device = self._session.get_default_input_device_info()
-        output_device = self._session.get_default_output_device_info()
+        session = pyaudio.PyAudio()
+        self._session = session
+        try:
+            input_device = session.get_default_input_device_info()
+            output_device = session.get_default_output_device_info()
+            self._devices = AudioDevices(
+                input=self._build_device(input_device),
+                output=self._build_device(output_device),
+            )
+            self._input = PyAudioInput(session=session)
+            self._output = PyAudioOutput(session=session)
+        except BaseException:
+            self.close()
+            raise
 
         self._logger.debug(
             "Session OPENED: input_device='{}', output_device='{}'",
-            input_device.get("name"),
-            output_device.get("name"),
+            self.devices.input.name,
+            self.devices.output.name,
         )
 
     def close(self) -> None:
@@ -85,14 +85,19 @@ class PyAudioDriver(AudioDriver[PyAudioInput, PyAudioOutput]):
 
         self._input = None
         self._output = None
+        self._devices = None
         self._session = None
 
         if errors:
-            self._logger.warn("Session TERMINATED: errors:{}", errors)
+            self._logger.warning("Session TERMINATED", errors=errors)
         else:
             self._logger.debug("Session TERMINATED")
 
-    def _require_session(self) -> pyaudio.PyAudio:
-        if self._session is None:
-            raise RuntimeError("Session is not open")
-        return self._session
+    @staticmethod
+    def _build_device(info: dict) -> AudioDevice:
+        name = info.get("name")
+        identifier = info.get("index")
+        return AudioDevice(
+            name=name if isinstance(name, str) and name else "Unknown",
+            identifier=str(identifier) if identifier is not None else None,
+        )

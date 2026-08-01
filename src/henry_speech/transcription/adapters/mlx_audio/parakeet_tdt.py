@@ -1,14 +1,15 @@
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
-import mlx.core as mx
 from huggingface_hub.utils import disable_progress_bars
-from mlx_audio.stt.models.parakeet import Model
-from mlx_audio.stt.utils import load_model
 
 from ....audio import AudioFrame
 from ...config import STTProfile
 from ...domain import TranscriptionChunk
 from ...ports import STTModel
+
+if TYPE_CHECKING:
+    from mlx_audio.stt.models.parakeet import Model
 
 
 class ParakeetTDTModel(STTModel):
@@ -20,8 +21,10 @@ class ParakeetTDTModel(STTModel):
         self._model: Model | None = None
 
     def transcribe(self, frame: AudioFrame) -> Iterator[TranscriptionChunk]:
+        import mlx.core as mx
+
         if self._model is None:
-            raise RuntimeError("Model is not loaded")
+            raise RuntimeError("Parakeet TDT model is not loaded")
 
         for chunk in self._model.stream_generate(mx.array(frame.samples)):
             yield TranscriptionChunk(
@@ -30,16 +33,19 @@ class ParakeetTDTModel(STTModel):
 
     def open(self) -> None:
         if self._model is not None:
-            raise RuntimeError("Model is already loaded")
+            raise RuntimeError("Parakeet TDT model is already loaded")
 
         model_id = (
             self._profile.model if self._profile.model else self._DEFAULT_MODEL_ID
         )
 
         with disable_progress_bars():
+            from mlx_audio.stt.models.parakeet import Model as LoadedModel
+            from mlx_audio.stt.utils import load_model
+
             self._logger.debug("Loading model: model_id='{}'", model_id)
             model = load_model(model_id)
-            assert isinstance(model, Model)
+            assert isinstance(model, LoadedModel)
             self._model = model
 
         self._logger.debug("Model READY")

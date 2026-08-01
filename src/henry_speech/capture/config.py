@@ -18,7 +18,7 @@ class WakeWordProfile(ConfigModel):
     @classmethod
     def validate_model_extension(cls, value: str) -> str:
         if not value.endswith(".onnx"):
-            raise ValueError("wakeword.model must be an ONNX file")
+            raise ValueError(f"wake-word model must be an ONNX file; got {value!r}")
         return value
 
 

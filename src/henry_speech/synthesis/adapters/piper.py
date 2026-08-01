@@ -10,7 +10,7 @@ from ..config import TTSProfile
 from ..ports import TTSModel
 
 
-class PiperModel(TTSModel):
+class PiperTTSModel(TTSModel):
     _REPOSITORY_ID: str = "rhasspy/piper-voices"
     _LENGTH_SCALE: float = 1.05
     _NOISE_SCALE: float | None = None
@@ -26,7 +26,7 @@ class PiperModel(TTSModel):
 
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
         if self._model is None:
-            raise RuntimeError("Model is not loaded")
+            raise RuntimeError("Piper voice model is not loaded")
 
         chunks = self._model.synthesize(
             text=text,
@@ -55,7 +55,7 @@ class PiperModel(TTSModel):
 
     def open(self) -> None:
         if self._model is not None:
-            raise RuntimeError("Model is already loaded")
+            raise RuntimeError("Piper voice model is already loaded")
 
         with disable_progress_bars():
             self._logger.debug(

@@ -69,7 +69,7 @@ class AbstractAsyncService(AbstractService, AbstractAsyncContextManager, ABC):
 
     async def start(self) -> None:
         if self._executor is not None:
-            raise RuntimeError("Service is already started")
+            raise RuntimeError(f"{self.__class__.__name__} is already started")
 
         loop = asyncio.get_running_loop()
         try:
@@ -128,7 +128,7 @@ class AbstractAsyncService(AbstractService, AbstractAsyncContextManager, ABC):
 
     def _require_executor(self) -> ThreadPoolExecutor:
         if self._executor is None:
-            raise RuntimeError("Executor is not open")
+            raise RuntimeError(f"{self.__class__.__name__} is not started")
 
         return self._executor
 

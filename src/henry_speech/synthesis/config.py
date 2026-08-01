@@ -10,4 +10,4 @@ class TTSProfile(ConfigModel):
 
 
 class TTSSettings(ConfigModel):
-    adapter: Literal["piper"] = "piper"
+    adapter: Literal["piper", "mlx:chatterbox"] = "piper"
