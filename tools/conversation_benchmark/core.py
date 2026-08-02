@@ -13,8 +13,8 @@ from henry_conversation import (
     LanguageModelRequest,
     LanguageModelRole,
 )
+from henry_conversation.graph import ResponseRouter
 from henry_conversation.model import LanguageModelService, get_language_model
-from henry_conversation.routing import ResponseRouter
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +50,12 @@ async def run_benchmark(
 ) -> tuple[BenchmarkResult, ...]:
     router = ResponseRouter()
     results: list[BenchmarkResult] = []
-    async with LanguageModelService(get_language_model(profile, settings)) as service:
+    adapter = get_language_model(
+        profile,
+        settings.model,
+        require_classifier=settings.classify_ambiguous,
+    )
+    async with LanguageModelService(adapter) as service:
         for index, case in enumerate(cases):
             plan = router.plan(case.text)
             started = perf_counter()

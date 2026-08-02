@@ -1,16 +1,13 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import henry_conversation.model as model_module
-from henry_conversation.config import (
-    ConversationProfile,
-    ConversationPrompts,
-    ConversationSettings,
-    LanguageModelProfile,
-    LanguageModelsProfile,
-)
+from henry_conversation.config import ConversationSettings
+from henry_conversation.profile import ConversationProfile, ConversationPrompts
 from tests.support import FakeLanguageModel
+from tools.conversation_benchmark import cli as cli_module
 from tools.conversation_benchmark.core import (
     BenchmarkCase,
     load_cases,
@@ -38,10 +35,10 @@ cases:
     assert cases == (BenchmarkCase("fast-001", "factual", "Krótkie pytanie?", "fast"),)
 
     profile = ConversationProfile(
-        models=LanguageModelsProfile(
-            fast=LanguageModelProfile(langchain="test:fast"),
-            detailed=LanguageModelProfile(langchain="test:detailed"),
-        ),
+        models={
+            "fast": {"model_id": "test:fast"},
+            "detailed": {"model_id": "test:detailed"},
+        },
         prompts=ConversationPrompts(
             system="System {conversation_summary}",
             opening="Opening {conversation_summary} {recent_conversation}",
@@ -51,7 +48,7 @@ cases:
     monkeypatch.setattr(
         model_module,
         "get_language_model",
-        lambda *_: FakeLanguageModel("Answer."),
+        lambda *_, **__: FakeLanguageModel("Answer."),
     )
     monkeypatch.setattr(
         "tools.conversation_benchmark.core.get_language_model",
@@ -71,3 +68,43 @@ cases:
 def test_conversation_benchmark_writes_empty_report(tmp_path: Path) -> None:
     _, markdown_path = write_report(tmp_path, ())
     assert "Routing accuracy: 0.0%" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_conversation_benchmark_cli_uses_configured_adapter(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profile = SimpleNamespace(
+        conversation=object(),
+        path=tmp_path / "profiles" / "default",
+    )
+    settings = ConversationSettings()
+    store = SimpleNamespace(
+        load_profile=lambda _: profile,
+        load_settings=lambda: SimpleNamespace(conversation=settings),
+    )
+    output_directories: list[Path] = []
+
+    async def fake_run_benchmark(*args):
+        assert args == (profile.conversation, settings, ())
+        return ()
+
+    def fake_write_report(output: Path, results):
+        assert results == ()
+        output_directories.append(output)
+        return output / "results.json", output / "report.md"
+
+    monkeypatch.setattr(cli_module, "LocalStore", lambda: store)
+    monkeypatch.setattr(cli_module, "load_cases", lambda _: ())
+    monkeypatch.setattr(cli_module, "run_benchmark", fake_run_benchmark)
+    monkeypatch.setattr(cli_module, "write_report", fake_write_report)
+
+    asyncio.run(
+        cli_module.run(
+            SimpleNamespace(
+                profile="default", suite=tmp_path / "suite.yml", output=None
+            )
+        )
+    )
+
+    assert output_directories[0].name.startswith("default-langchain-")

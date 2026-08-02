@@ -22,52 +22,50 @@ from henry_conversation import (
     UserTurn,
     run_conversation_worker,
 )
-from henry_conversation.config import (
-    ConversationProfile,
-    ConversationPrompts,
-    ConversationReactions,
-    ConversationSettings,
-    LanguageModelProfile,
-    LanguageModelsProfile,
-)
-from henry_conversation.domain import (
-    ConversationMessage,
-    ConversationRole,
-    ConversationTextChunk,
-    LanguageModelChunk,
-    LanguageModelRequest,
-    LanguageModelRole,
-    ResponseMode,
-    TurnIntent,
-)
+from henry_conversation.config import ConversationSettings
 from henry_conversation.graph import (
     ConversationContext,
     ConversationGraph,
     ConversationNodes,
+    ResponseMode,
+    ResponseRouter,
+    TurnIntent,
 )
-from henry_conversation.model import LanguageModelService, get_language_model
+from henry_conversation.model import (
+    ConversationMessage,
+    ConversationRole,
+    LanguageModelChunk,
+    LanguageModelRequest,
+    LanguageModelRole,
+    LanguageModelService,
+    get_language_model,
+)
 from henry_conversation.model.adapters.langchain import LangChainLanguageModel
 from henry_conversation.model.adapters.mlx import MLXLanguageModel
-from henry_conversation.preparation import ProfilePreparation
-from henry_conversation.reply import ReplySegmenter
-from henry_conversation.routing import ResponseRouter
+from henry_conversation.model.config import (
+    LangChainModelProfile,
+    LangChainSettings,
+    MLXModelProfile,
+    MLXSettings,
+)
+from henry_conversation.profile import (
+    ConversationProfile,
+    ConversationPrompts,
+    ConversationReactions,
+    ProfilePreparation,
+)
+from henry_conversation.reply import ConversationTextChunk, ReplySegmenter
 from henry_conversation.worker import Worker
 from tests.support import FakeLanguageModel
 
 
 def profile() -> ConversationProfile:
     return ConversationProfile(
-        models=LanguageModelsProfile(
-            fast=LanguageModelProfile(
-                langchain="test:fast", mlx="test/fast", max_tokens=96
-            ),
-            detailed=LanguageModelProfile(
-                langchain="test:detailed", mlx="test/detailed", max_tokens=256
-            ),
-            classifier=LanguageModelProfile(
-                langchain="test:classifier", mlx="test/classifier", max_tokens=4
-            ),
-        ),
+        models={
+            "fast": {"model_id": "test/fast", "max_tokens": 96},
+            "detailed": {"model_id": "test/detailed", "max_tokens": 256},
+            "classifier": {"model_id": "test/classifier", "max_tokens": 4},
+        },
         recent_messages=4,
         prompts=ConversationPrompts(
             system="System {conversation_summary}",
@@ -85,12 +83,41 @@ def context(delay: float = 0.5) -> ConversationContext:
 
 def test_configuration_domain_events_and_routing() -> None:
     value = profile()
-    assert value.models.fast.model_for("mlx") == "test/fast"
-    assert value.models.detailed.max_tokens == 256
-    with pytest.raises(ValueError, match="No model"):
-        LanguageModelProfile(langchain="only").model_for("mlx")
-    with pytest.raises(ValidationError, match="At least one"):
-        LanguageModelProfile()
+    assert value.models_langchain.fast.model_id == "test/fast"
+    mlx_value = value.model_copy(
+        update={
+            "models": {
+                **value.models,
+                "fast": {**value.models["fast"], "top_k": 12},
+            }
+        }
+    )
+    assert mlx_value.models_mlx.fast.top_k == 12
+    with pytest.raises(ValidationError, match="top_k"):
+        _ = mlx_value.models_langchain
+    assert isinstance(ConversationSettings().model, LangChainSettings)
+    assert isinstance(
+        ConversationSettings.model_validate({"model": {"adapter": "mlx"}}).model,
+        MLXSettings,
+    )
+    with pytest.raises(ValidationError, match="model_id"):
+        _ = ConversationProfile(
+            models={"fast": {}, "detailed": {}},
+            prompts=value.prompts,
+        ).models_langchain
+    legacy = value.model_copy(
+        update={
+            "models": {
+                "fast": {"langchain": "test:fast", "mlx": "test/fast"},
+                "detailed": {
+                    "langchain": "test:detailed",
+                    "mlx": "test/detailed",
+                },
+            }
+        }
+    )
+    with pytest.raises(ValidationError, match="model_id"):
+        _ = legacy.models_langchain
     with pytest.raises(ValidationError):
         ConversationReactions(wake=("",))
     with pytest.raises(ValidationError):
@@ -553,7 +580,10 @@ def test_langchain_adapter_maps_messages_and_configuration(
         return FakeChat()
 
     monkeypatch.setattr("langchain.chat_models.init_chat_model", init_chat_model)
-    adapter = LangChainLanguageModel(profile().models)
+    adapter = LangChainLanguageModel(
+        profile().models_langchain,
+        LangChainSettings(),
+    )
     with adapter:
         adapter.prepare(LanguageModelRole.FAST)
         chunks = list(
@@ -568,18 +598,25 @@ def test_langchain_adapter_maps_messages_and_configuration(
             )
         )
     assert chunks == [LanguageModelChunk("answer")]
-    assert calls[0][0] == "test:fast"
+    assert calls[0][0] == "test/fast"
     assert calls[0][1]["num_predict"] == 96
     assert calls[0][1]["reasoning"] is False
 
-    ollama_profile = profile().models.model_copy(
+    ollama_profile = profile().models_langchain.model_copy(
         update={
-            "fast": LanguageModelProfile(langchain="ollama:gpt-oss:20b", max_tokens=96)
+            "fast": LangChainModelProfile(
+                model_id="ollama:gpt-oss:20b",
+                max_tokens=96,
+            )
         }
     )
-    with LangChainLanguageModel(ollama_profile) as ollama_adapter:
+    with LangChainLanguageModel(
+        ollama_profile,
+        LangChainSettings(base_url="http://test.local"),
+    ) as ollama_adapter:
         ollama_adapter.prepare(LanguageModelRole.FAST)
     assert calls[1][1]["reasoning"] == "low"
+    assert calls[1][1]["base_url"] == "http://test.local"
 
 
 def test_mlx_adapter_loads_lazily_and_streams(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -636,9 +673,9 @@ def test_mlx_adapter_loads_lazily_and_streams(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache)
     monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
 
-    models = profile().models.model_copy(
+    models = profile().models_mlx.model_copy(
         update={
-            "fast": LanguageModelProfile(mlx="test/detailed", max_tokens=96),
+            "fast": MLXModelProfile(model_id="test/detailed", max_tokens=96),
         }
     )
     adapter = MLXLanguageModel(models)
@@ -729,7 +766,7 @@ def test_mlx_adapter_generates_without_unsupported_system_prefix_cache(
     monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache)
     monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
 
-    adapter = MLXLanguageModel(profile().models)
+    adapter = MLXLanguageModel(profile().models_mlx)
     with adapter:
         chunks = list(
             adapter.generate(
@@ -750,31 +787,35 @@ def test_mlx_adapter_generates_without_unsupported_system_prefix_cache(
 
 def test_adapter_factory_and_public_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(
-        get_language_model(profile(), ConversationSettings(adapter="langchain")),
+        get_language_model(profile(), LangChainSettings()),
         LangChainLanguageModel,
     )
     assert isinstance(
-        get_language_model(profile(), ConversationSettings(adapter="mlx")),
+        get_language_model(profile(), MLXSettings()),
         MLXLanguageModel,
     )
     with pytest.raises(ValueError, match="Unsupported"):
         get_language_model(profile(), SimpleNamespace(adapter="unknown"))
     incomplete = profile().model_copy(
         update={
-            "models": profile().models.model_copy(
-                update={"fast": LanguageModelProfile(langchain="only")}
-            )
+            "models": {"fast": {"model_id": "only"}},
         }
     )
-    with pytest.raises(ValueError, match="No model"):
-        get_language_model(incomplete, ConversationSettings(adapter="mlx"))
+    with pytest.raises(ValidationError, match="detailed"):
+        get_language_model(incomplete, MLXSettings())
     no_classifier = profile().model_copy(
-        update={"models": profile().models.model_copy(update={"classifier": None})}
+        update={
+            "models": {
+                "fast": {"model_id": "test/fast"},
+                "detailed": {"model_id": "test/detailed"},
+            }
+        }
     )
     with pytest.raises(ValueError, match="requires a classifier"):
         get_language_model(
             no_classifier,
-            ConversationSettings(classify_ambiguous=True),
+            LangChainSettings(),
+            require_classifier=True,
         )
 
     async def scenario() -> None:
@@ -785,7 +826,11 @@ def test_adapter_factory_and_public_runner(monkeypatch: pytest.MonkeyPatch) -> N
             calls.append(self)
 
         monkeypatch.setattr(Worker, "run", fake_run)
-        monkeypatch.setattr(model_module, "get_language_model", lambda *_: fake_model)
+        monkeypatch.setattr(
+            model_module,
+            "get_language_model",
+            lambda *_, **__: fake_model,
+        )
         await run_conversation_worker(EventBus(), profile(), ConversationSettings())
         assert len(calls) == 1
         assert isinstance(calls[0]._graph, ConversationGraph)

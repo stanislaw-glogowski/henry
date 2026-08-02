@@ -2,7 +2,7 @@ import threading
 from collections import deque
 from collections.abc import Iterator
 
-from henry_conversation.domain import (
+from henry_conversation.model import (
     LanguageModelChunk,
     LanguageModelRequest,
     LanguageModelRole,

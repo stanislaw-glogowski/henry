@@ -8,10 +8,10 @@ from ....audio import AudioFrame
 from ...config import WakeWordProfile
 from ...domain import DetectionResult
 from ...ports import WakeWordModel
-from .onnx_model import OpenWakeWordONNXModel
+from .base import BaseModel
 
 
-class OpenWakeWordModel(WakeWordModel, OpenWakeWordONNXModel):
+class OpenWakeWordModel(WakeWordModel, BaseModel):
     _MELSPEC_PATH = "melspectrogram.onnx"
     _EMBEDDING_PATH = "embedding_model.onnx"
     _NUM_CPU = 1

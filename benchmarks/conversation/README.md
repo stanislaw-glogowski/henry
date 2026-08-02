@@ -4,17 +4,15 @@ These benchmarks compare routing and language-model latency without requiring a
 microphone or speaker. The Polish suite is the only project file containing Polish
 benchmark utterances; implementation, reports, and documentation remain in English.
 
-Run the current LangChain baseline:
+Select the adapter in `settings.yml`, make the requested profile contain model
+parameters for that adapter, and run:
 
 ```bash
-uv run python -m tools.conversation_benchmark --adapter langchain
+uv run python -m tools.conversation_benchmark
 ```
 
-Run the MLX candidates after installing their weights locally:
-
-```bash
-uv run python -m tools.conversation_benchmark --adapter mlx
-```
+The same command runs the current LangChain baseline or an MLX candidate. Do not
+keep both providers' model identifiers in one profile.
 
 Use `pl-henry.yml` and `pl-alexa.yml` for profile-specific blind reviews. Henry
 should remain useful and stop joking in sensitive situations. Alexa should use

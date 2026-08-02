@@ -38,11 +38,11 @@ async def run_speech_worker(
             settings.wakeword,
         )
         tts_model = get_tts_model(
-            profile.tts,
+            profile,
             settings.tts,
         )
         stt_model = get_stt_model(
-            profile.stt,
+            profile,
             settings.stt,
         )
         await Worker(

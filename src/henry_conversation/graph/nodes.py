@@ -5,19 +5,17 @@ from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessag
 from langchain_core.prompts import PromptTemplate
 from langgraph.config import get_stream_writer
 
-from ..domain import (
+from ..model import (
     ConversationMessage,
     ConversationRole,
-    ConversationTextChunk,
     LanguageModelRequest,
     LanguageModelRole,
-    ResponseMode,
-    ResponsePlan,
+    LanguageModelService,
 )
-from ..model import LanguageModelService
-from ..preparation import ProfilePreparation
-from ..routing import ResponseRouter
+from ..profile import ProfilePreparation
+from ..reply import ConversationTextChunk
 from .context import ConversationContext, ConversationRuntime
+from .routing import ResponseMode, ResponsePlan, ResponseRouter
 from .state import ConversationState
 
 

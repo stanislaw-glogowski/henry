@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from time import perf_counter
 
+from pydantic import TypeAdapter
+
 from henry_speech.transcription.adapters import get_stt_model
 from henry_speech.transcription.config import STTProfile, STTSettings
 
@@ -12,8 +14,13 @@ from .core import error_rate, load_recordings, read_wav, timestamp_id, write_row
 def run_stt(args) -> Path:
     session_path = args.session.expanduser().resolve()
     recordings = load_recordings(session_path)
-    profile = STTProfile(model=args.model, language=args.language)
-    settings = STTSettings(adapter=args.adapter)
+    profile_values: dict[str, object] = {}
+    if args.model is not None:
+        profile_values["model_id"] = args.model
+    if args.language is not None:
+        profile_values["language"] = args.language
+    profile = STTProfile(stt=profile_values)
+    settings = TypeAdapter(STTSettings).validate_python({"adapter": args.adapter})
     model = get_stt_model(profile, settings)
     output = args.output or session_path.parents[3] / "results" / timestamp_id()
     output.mkdir(parents=True, exist_ok=True)

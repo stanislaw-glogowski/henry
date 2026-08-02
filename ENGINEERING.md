@@ -45,6 +45,20 @@ not broaden a change merely to make surrounding code match these guidelines.
 - Keep validated profile and runtime settings in `config.py`.
 - Keep minimal consumer-facing abstractions in `ports.py`.
 - Keep external-library and operating-system implementations below `adapters/`.
+- Put a single-module concrete adapter directly below `adapters/`. Normalize
+  its full adapter identifier to underscores, for example
+  `mlx:parakeet-tdt` becomes `mlx_parakeet_tdt.py`.
+- Give an adapter its own subpackage only when its implementation spans
+  multiple modules or owned resources. `openwakeword`, `pyaudio`, and
+  `avfaudio` are multi-module adapters; do not create a subpackage only to
+  group one implementation by provider.
+- Shared adapter support such as `mlx_base.py` may stay beside the concrete
+  adapter modules and must not become a public adapter facade.
+- Within `henry_conversation`, keep language-model contracts and adapters in
+  `model/`, profile configuration and preparation in `profile/`, LangGraph
+  state and routing in `graph/`, and reply-domain values and segmentation in
+  `reply/`. Keep only public composition, events, and long-running coordination
+  at the package root.
 - Give stateful helpers and algorithms their own semantic modules, such as
   `buffer.py`, `resampler.py`, or `segmenter.py`.
 - One element per file is not an absolute rule. Small, tightly related domain
@@ -208,8 +222,20 @@ not broaden a change merely to make surrounding code match these guidelines.
   technical runtime selection and tuning.
 - Use `driver` for the audio-device implementation and `adapter` for model
   implementations.
-- Validate configuration when it is loaded, not during inference.
-- Keep the profile prompt layout fixed. Do not add configurable prompt paths.
+- Model settings with multiple adapter-specific shapes must use a discriminated
+  union keyed by `adapter`. Each variant owns its technical defaults.
+- STT, TTS, and conversation-model profile blocks contain only parameters for
+  the selected adapter. Never retain parallel provider fields for one role.
+  Keep the blocks as mappings while loading the profile, then validate the
+  selected adapter's frozen profile model in the adapter factory.
+- Pass the complete profile contract to its adapter factory. Do not pass the
+  unvalidated nested mapping directly to a concrete adapter.
+- Complete selected-adapter validation before opening the adapter or starting
+  inference.
+- Keep the profile prompt and reaction layout fixed. Prompts are Markdown
+  files; `reactions/wake.txt` and `reactions/wait.txt` contain one reaction per
+  non-empty line. Do not add configurable paths or duplicate this text in
+  `profile.yml`.
 - `henry_resources` must not assume the process working directory.
 - Resolve local data through `HENRY_HOME`, the nearest `.henry`, and then the
   platform data directory.

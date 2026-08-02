@@ -21,13 +21,8 @@ from henry_conversation import (
     ReplyPhrase,
     UserTurn,
 )
-from henry_conversation.config import (
-    ConversationProfile,
-    ConversationPrompts,
-    ConversationSettings,
-    LanguageModelProfile,
-    LanguageModelsProfile,
-)
+from henry_conversation.config import ConversationSettings
+from henry_conversation.profile import ConversationProfile, ConversationPrompts
 from henry_speech.config import SpeechSettings
 from henry_speech.events import WakeWordObserved
 
@@ -36,10 +31,10 @@ def profile():
     return SimpleNamespace(
         name="Henry",
         conversation=ConversationProfile(
-            models=LanguageModelsProfile(
-                fast=LanguageModelProfile(langchain="test:model"),
-                detailed=LanguageModelProfile(langchain="test:model"),
-            ),
+            models={
+                "fast": {"model_id": "test:model"},
+                "detailed": {"model_id": "test:model"},
+            },
             prompts=ConversationPrompts(system="s", opening="o", summary="m"),
         ),
     )

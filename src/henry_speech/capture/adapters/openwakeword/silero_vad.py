@@ -6,10 +6,10 @@ from ....audio import AudioFrame
 from ...config import VADSettings
 from ...domain import DetectionResult
 from ...ports import VADModel
-from .onnx_model import OpenWakeWordONNXModel
+from .base import BaseModel
 
 
-class SileroVADModel(VADModel, OpenWakeWordONNXModel):
+class SileroVADModel(VADModel, BaseModel):
     _MODEL_PATH: str = "silero_vad.onnx"
     _FRAME_SIZE: int = 512
 

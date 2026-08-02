@@ -1,8 +1,12 @@
 from collections.abc import Iterator
 from typing import Any
 
-from ...config import LanguageModelProfile, LanguageModelsProfile
-from ...domain import (
+from ..config import (
+    LangChainModelProfile,
+    LangChainModelsProfile,
+    LangChainSettings,
+)
+from ..domain import (
     ConversationRole,
     LanguageModelChunk,
     LanguageModelRequest,
@@ -12,9 +16,14 @@ from ..ports import LanguageModel
 
 
 class LangChainLanguageModel(LanguageModel):
-    def __init__(self, profiles: LanguageModelsProfile) -> None:
+    def __init__(
+        self,
+        profiles: LangChainModelsProfile,
+        settings: LangChainSettings,
+    ) -> None:
         super().__init__()
         self._profiles = profiles
+        self._settings = settings
         self._models: dict[LanguageModelRole, Any] = {}
         self._init_chat_model: Any = None
 
@@ -55,7 +64,7 @@ class LangChainLanguageModel(LanguageModel):
             return model
 
         profile = self._profile(role)
-        model_id = profile.model_for("langchain")
+        model_id = profile.model_id
         if self._init_chat_model is None:
             raise RuntimeError("LangChain language model adapter is not open")
         model = self._init_chat_model(
@@ -64,7 +73,7 @@ class LangChainLanguageModel(LanguageModel):
             top_p=profile.top_p,
             num_predict=profile.max_tokens,
             reasoning=self._reasoning(model_id, profile.thinking),
-            base_url="http://localhost:11434",
+            base_url=self._settings.base_url,
         )
         self._models[role] = model
         self._logger.debug("Model LOADED: role='{}', model='{}'", role, model_id)
@@ -77,7 +86,7 @@ class LangChainLanguageModel(LanguageModel):
             return "low"
         return thinking
 
-    def _profile(self, role: LanguageModelRole) -> LanguageModelProfile:
+    def _profile(self, role: LanguageModelRole) -> LangChainModelProfile:
         profile = getattr(self._profiles, role.value)
         if profile is None:
             raise RuntimeError(f"Language model role is not configured: {role!r}")

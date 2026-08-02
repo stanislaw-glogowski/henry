@@ -11,7 +11,6 @@ from .core import load_cases, run_benchmark, write_report
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark Henry conversation models")
     parser.add_argument("--profile", default="default")
-    parser.add_argument("--adapter", choices=("langchain", "mlx"), default="langchain")
     parser.add_argument(
         "--suite",
         type=Path,
@@ -24,13 +23,12 @@ def parse_args() -> argparse.Namespace:
 async def run(args: argparse.Namespace) -> tuple[Path, Path]:
     store = LocalStore()
     profile = store.load_profile(args.profile)
-    configured = store.load_settings().conversation
-    settings = configured.model_copy(update={"adapter": args.adapter})
+    settings = store.load_settings().conversation
     cases = load_cases(args.suite)
     results = await run_benchmark(profile.conversation, settings, cases)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     output = args.output or profile.path.parents[1] / "benchmarks" / "conversation" / (
-        f"{args.profile}-{args.adapter}-{timestamp}"
+        f"{args.profile}-{settings.model.adapter}-{timestamp}"
     )
     return write_report(output, results)
 

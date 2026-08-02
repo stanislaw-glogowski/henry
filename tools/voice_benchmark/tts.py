@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from time import perf_counter
 
+from pydantic import TypeAdapter
+
 from henry_speech.audio import AudioBuffer
 from henry_speech.synthesis.adapters import get_tts_model
 from henry_speech.synthesis.config import TTSProfile, TTSSettings
@@ -12,8 +14,9 @@ from .core import benchmark_root, load_suite, timestamp_id, write_rows, write_wa
 
 def run_tts(args) -> Path:
     suite = load_suite(args.suite)
-    profile = TTSProfile(model=args.model)
-    settings = TTSSettings(adapter=args.adapter)
+    profile_key = "voice_path" if args.adapter == "piper" else "model_id"
+    profile = TTSProfile(tts={profile_key: args.model})
+    settings = TypeAdapter(TTSSettings).validate_python({"adapter": args.adapter})
     model = get_tts_model(profile, settings)
     output = args.output or benchmark_root() / "results" / timestamp_id()
     output = output.expanduser().resolve()

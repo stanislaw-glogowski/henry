@@ -116,7 +116,7 @@ uv run hf download mlx-community/parakeet-tdt-0.6b-v3
 Piper voices consist of an ONNX file and its adjacent `.onnx.json`
 configuration. High quality is recommended; medium quality is a smaller alternative.
 
-| Quality            | `tts.model` value in `profile.yml`               | Download command                                                                                                                           |
+| Quality            | `tts.voice_path` value in `profile.yml`          | Download command                                                                                                                           |
 |--------------------|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | Medium             | `pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx` | `uv run hf download rhasspy/piper-voices pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx.json` |
 | High (recommended) | `pl/pl_PL/bass/high/pl_PL-bass-high.onnx`       | `uv run hf download rhasspy/piper-voices pl/pl_PL/bass/high/pl_PL-bass-high.onnx pl/pl_PL/bass/high/pl_PL-bass-high.onnx.json`             |
@@ -165,13 +165,17 @@ Profiles use a fixed directory contract:
 ```text
 .henry/profiles/default/
 ├── profile.yml
-└── prompts/
-    ├── system.md
-    ├── opening.md
-    └── summary.md
+├── prompts/
+│   ├── system.md
+│   ├── opening.md
+│   └── summary.md
+└── reactions/
+    ├── wake.txt
+    └── wait.txt
 ```
 
-Prompt paths are not configurable. Persona, conversation opening, and summary behavior belong to these profile files.
+Prompt and reaction paths are not configurable. Persona, conversation opening, and summary behavior belong to the
+Markdown files. Prepared wake and wait reactions belong to the text files, one phrase per non-empty line.
 Versioned Henry and Alexa templates are available in `examples/profiles`. Copy
 the selected directories into `.henry/profiles` and keep local model or voice
 changes outside version control. Henry is a dry, world-weary but dependable
@@ -205,23 +209,48 @@ The conversation adapter is selected independently:
 
 ```yaml
 conversation:
-  adapter: langchain       # or mlx
+  model:
+    adapter: langchain
+    base_url: http://localhost:11434
   acknowledgement_delay: 0.5
   classify_ambiguous: false
 ```
 
-Each profile maps the `fast`, `detailed`, and optional `classifier` roles to
-adapter-specific model identifiers. The supplied templates use the existing
-`ollama:gpt-oss:20b` LangChain baseline and
-`mlx-community/Qwen3.5-4B-MLX-4bit` for every MLX role on an M1 Max with 64 GB
-of unified memory. Roles that use the same model share one loaded instance.
-Model weights are not included in the repository. Enable ambiguous-turn
-classification after selecting the MLX adapter to classify without adding a
-full Ollama round trip. Supplied profiles keep thinking mode disabled so
-ordinary spoken replies do not begin with a long silent reasoning phase.
-The MLX adapter also caches the stable persona prefix and copies that cache for
-each generation; mutable summaries and conversation messages remain outside the
-shared cache.
+For direct MLX inference, the selected settings variant contains only its own
+fields:
+
+```yaml
+conversation:
+  model:
+    adapter: mlx
+```
+
+Each profile contains parameters only for the adapter selected in `settings.yml`.
+The `fast`, `detailed`, and optional `classifier` roles therefore have one
+`model_id` each, rather than parallel LangChain and MLX identifiers:
+
+```yaml
+conversation:
+  models:
+    fast:
+      model_id: ollama:gpt-oss:20b
+      max_tokens: 96
+    detailed:
+      model_id: ollama:gpt-oss:20b
+      max_tokens: 256
+```
+
+The supplied profiles target the default LangChain/Ollama adapter. To use MLX,
+select `adapter: mlx` in settings and use MLX model identifiers in the active
+profile, for example `mlx-community/Qwen3.5-4B-MLX-4bit`; MLX roles may also set
+`top_k`. Do not retain an unused provider's configuration in the profile.
+Roles that use the same model share one loaded instance. Model weights are not
+included in the repository. Enabling `classify_ambiguous` requires the selected
+profile to define a `classifier` role. Supplied profiles keep thinking mode
+disabled so ordinary spoken replies do not begin with a long silent reasoning
+phase. The MLX adapter also caches the stable persona prefix and copies that
+cache for each generation; mutable summaries and conversation messages remain
+outside the shared cache.
 
 Use `driver: pyaudio` as a fallback when native voice processing is not
 available. Developers can point at a separately built helper with
@@ -234,13 +263,18 @@ models only when Henry starts:
 speech:
   stt:
     adapter: mlx:qwen3-asr  # or mlx:parakeet-tdt / mlx:whisper
+    model_id: mlx-community/Qwen3-ASR-0.6B-8bit
   tts:
     adapter: mlx:chatterbox # or piper
+    model_id: mlx-community/chatterbox-fp16
+    lang_code: en
 ```
 
-The corresponding `stt.model` and `tts.model` values belong to the active
-profile. `stt.language` is an optional adapter-specific hint; set it to `pl`
-for Polish Whisper profiles and omit it when Whisper should detect English.
+Each settings variant owns its technical defaults. The active profile may
+override only fields supported by the selected adapter. A Piper profile uses
+`tts.voice_path`; an MLX profile may override `model_id`. `stt.language` is a
+Whisper-specific profile hint; set it to `pl` for Polish and omit it when
+Whisper should detect the language.
 Parakeet and Piper remain the defaults until recorded Polish
 benchmarks demonstrate a better choice.
 
@@ -351,9 +385,11 @@ setup.
 Conversation model latency and routing can be measured without audio:
 
 ```bash
-uv run python -m tools.conversation_benchmark --adapter langchain
-uv run python -m tools.conversation_benchmark --adapter mlx
+uv run python -m tools.conversation_benchmark
 ```
+
+The benchmark uses the conversation adapter selected in `settings.yml` and the
+matching model parameters from the requested profile.
 
 See `benchmarks/conversation/README.md` for the Polish source suite, report
 format, and human listening criteria. Generated results are local artifacts and

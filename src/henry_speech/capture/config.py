@@ -6,7 +6,10 @@ from henry_common.validation import ConfigModel
 
 
 class VADSettings(ConfigModel):
-    adapter: Literal["mlx:silero_vad", "openwakeword"] = "mlx:silero_vad"
+    adapter: Literal[
+        "mlx:silero_vad",
+        "openwakeword",
+    ] = "mlx:silero_vad"
     threshold: float = 0.5
 
 

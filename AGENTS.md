@@ -85,10 +85,27 @@ profiles/<profile-id>/
     system.md
     opening.md
     summary.md
+  reactions/
+    wake.txt
+    wait.txt
 ```
 
-Do not add configurable prompt paths. Keep persona, opening behavior, summary instructions, and other profile-specific
-text in these files rather than Python constants.
+Do not add configurable prompt or reaction paths. Keep persona, opening behavior, summary instructions, and prepared
+delivery reactions in these files rather than Python constants or inline YAML. Reaction files contain one phrase per
+non-empty line.
+
+A concrete adapter implemented by one module lives directly below `adapters/`; normalize its complete identifier to
+underscores, for example `mlx:parakeet-tdt` becomes `mlx_parakeet_tdt.py`. Use an adapter subpackage only when the
+implementation spans multiple modules or owned resources, as with `openwakeword`, `pyaudio`, and `avfaudio`.
+
+Within `henry_conversation`, language-model contracts and adapters belong in `model/`, profile prompts and preparation
+belong in `profile/`, LangGraph state and routing belong in `graph/`, and generated-text segmentation belongs in
+`reply/`. Keep the package root limited to public composition, events, and long-running coordination.
+
+STT, TTS, and conversation-model settings are discriminated unions keyed by `adapter` and own technical defaults. Their
+profile blocks hold only parameters for the selected adapter. Do not retain parallel provider fields such as
+`langchain` and `mlx` for one model role. Each factory receives the complete profile contract and validates the selected
+adapter's frozen profile model before constructing the concrete adapter.
 
 Blocking adapters and ML runtimes must remain in their owning worker threads. Cross the thread/event-loop boundary with
 `queue.Queue` or `loop.call_soon_threadsafe(...)`. Never mutate a thread-owned model directly from the event loop.

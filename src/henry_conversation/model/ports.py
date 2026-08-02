@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 from henry_common.components import AbstractResource
 
-from ..domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
+from .domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
 
 
 class LanguageModel(AbstractResource, ABC):

@@ -18,8 +18,9 @@ from henry_speech.events import (
 )
 from henry_speech.segmentation import UtteranceSegmenter
 from henry_speech.segmentation.config import SegmentationSettings
-from henry_speech.synthesis import TTSProfile
-from henry_speech.transcription import STTProfile, TurnEndpointDetector
+from henry_speech.synthesis.config import MLXChatterboxSettings
+from henry_speech.transcription import TurnEndpointDetector
+from henry_speech.transcription.config import MLXWhisperSettings
 
 FORMAT = AudioFormat(sample_rate=16_000, channels=1)
 
@@ -142,15 +143,30 @@ def test_segmentation_uses_longer_pause_for_short_utterance_and_hard_limit() -> 
 def test_speech_configuration_defaults_and_validation() -> None:
     profile = SpeechProfile(
         wakeword=WakeWordProfile(model="wake.onnx"),
-        tts=TTSProfile(model="voice.onnx"),
-        stt=STTProfile(),
+        tts={"voice_path": "voice.onnx"},
+        stt={},
     )
-    assert profile.stt.model is None
+    assert profile.tts_piper.voice_path == "voice.onnx"
+    assert profile.stt_mlx_parakeet_tdt.model_id is None
     assert SpeechSettings().audio.driver == "avfaudio"
     assert SpeechSettings().segmentation.min_start_speech_frames == 10
 
+    alternate = SpeechSettings.model_validate(
+        {
+            "tts": {"adapter": "mlx:chatterbox"},
+            "stt": {"adapter": "mlx:whisper"},
+        }
+    )
+    assert isinstance(alternate.tts, MLXChatterboxSettings)
+    assert isinstance(alternate.stt, MLXWhisperSettings)
+
     with pytest.raises(ValidationError, match="ONNX"):
         WakeWordProfile(model="wake.bin")
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        SpeechSettings.model_validate(
+            {"stt": {"adapter": "mlx:parakeet-tdt", "language": "pl"}}
+        )
 
 
 def test_turn_endpoint_detector_recognizes_continuations() -> None:

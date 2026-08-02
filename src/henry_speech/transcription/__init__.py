@@ -1,5 +1,5 @@
 from .adapters import get_stt_model
-from .config import STTProfile, STTSettings
+from .config import STTProfile, STTSettings, default_stt_settings
 from .domain import Transcription, TranscriptionChunk, TranscriptionText
 from .endpoint import TurnEndpointDetector
 from .ports import STTModel
@@ -14,5 +14,6 @@ __all__ = [
     "TranscriptionService",
     "TranscriptionText",
     "TurnEndpointDetector",
+    "default_stt_settings",
     "get_stt_model",
 ]

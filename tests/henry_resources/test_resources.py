@@ -12,25 +12,25 @@ from henry_resources.settings import Settings
 def write_profile(root: Path, name: str = "default") -> Path:
     profile = root / "profiles" / name
     prompts = profile / "prompts"
+    reactions = profile / "reactions"
     prompts.mkdir(parents=True)
+    reactions.mkdir()
     (profile / "profile.yml").write_text(
         """
 name: Henry
 conversation:
   models:
     fast:
-      langchain: ollama:gpt-oss:20b
-      mlx: Qwen/Qwen3-8B-MLX-4bit
+      model_id: ollama:gpt-oss:20b
     detailed:
-      langchain: ollama:gpt-oss:20b
-      mlx: Qwen/Qwen3-14B-MLX-4bit
+      model_id: ollama:gpt-oss:20b
   recent_messages: 6
 wakeword:
   model: wakeword.onnx
 tts:
-  model: voice.onnx
+  voice_path: voice.onnx
 stt:
-  language: pl
+  model_id: profile/stt
 """.strip(),
         encoding="utf-8",
     )
@@ -45,12 +45,25 @@ stt:
         "Summarize {conversation_summary} {recent_conversation}",
         encoding="utf-8",
     )
+    (reactions / "wake.txt").write_text("Tak, słucham.\nJestem.\n", encoding="utf-8")
+    (reactions / "wait.txt").write_text(
+        "Chwileczkę.\nJuż sprawdzam.\n", encoding="utf-8"
+    )
     return profile
 
 
 def write_settings(root: Path) -> None:
     (root / "settings.yml").write_text(
-        "speech:\n  audio:\n    driver: pyaudio\n", encoding="utf-8"
+        """
+conversation:
+  model:
+    adapter: langchain
+    base_url: http://models.local:11434
+speech:
+  audio:
+    driver: pyaudio
+""".strip(),
+        encoding="utf-8",
     )
 
 
@@ -68,12 +81,16 @@ def test_local_store_loads_profile_settings_and_models(tmp_path: Path) -> None:
     assert profile.id == "default"
     assert profile.path == profile_path
     assert profile.name == "Henry"
-    assert profile.stt.language == "pl"
+    assert profile.stt == {"model_id": "profile/stt"}
     assert profile.conversation.recent_messages == 6
     assert profile.conversation.prompts.system.startswith("System")
+    assert profile.conversation.reactions.wake == ("Tak, słucham.", "Jestem.")
     assert "id" not in profile.model_dump()
     assert [item.id for item in store.list_profiles()] == ["default", "second"]
-    assert store.load_settings() == Settings(speech={"audio": {"driver": "pyaudio"}})
+    settings = store.load_settings()
+    assert settings.conversation.model.adapter == "langchain"
+    assert settings.conversation.model.base_url == "http://models.local:11434"
+    assert settings.speech.audio.driver == "pyaudio"
     assert store.ensure_model_path("nested", "model.onnx") == model_path
 
 
@@ -98,6 +115,11 @@ def test_profile_requires_fixed_prompt_files_and_valid_configuration(
         Profile.load_from_directory(profile_path)
 
     (profile_path / "prompts" / "opening.md").write_text("open", encoding="utf-8")
+    (profile_path / "reactions" / "wait.txt").unlink()
+    with pytest.raises(FileNotFoundError, match=r"wait\.txt"):
+        Profile.load_from_directory(profile_path)
+
+    (profile_path / "reactions" / "wait.txt").write_text("wait", encoding="utf-8")
     (profile_path / "profile.yml").write_text("name: Henry\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         Profile.load_from_directory(profile_path)
@@ -129,6 +151,13 @@ def test_settings_and_profile_validation(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         Settings.load_from_file(settings_path)
 
+    settings_path.write_text(
+        "conversation:\n  adapter: mlx\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="adapter"):
+        Settings.load_from_file(settings_path)
+
     profile_path = write_profile(tmp_path)
     profile_file = profile_path / "profile.yml"
     profile_file.write_text(
@@ -150,6 +179,7 @@ def test_versioned_henry_and_alexa_profiles_are_valid_and_distinct() -> None:
     assert alexa.name == "Alexa"
     assert "world-weary" in henry.conversation.prompts.system
     assert "conversation with a child" in alexa.conversation.prompts.system
-    expected_mlx_model = "mlx-community/Qwen3.5-4B-MLX-4bit"
-    assert henry.conversation.models.fast.mlx == expected_mlx_model
-    assert alexa.conversation.models.detailed.mlx == expected_mlx_model
+    expected_model = "ollama:gpt-oss:20b"
+    assert henry.conversation.models_langchain.fast.model_id == expected_model
+    assert alexa.conversation.models_langchain.detailed.model_id == expected_model
+    assert "mlx" not in henry.conversation.models["fast"]

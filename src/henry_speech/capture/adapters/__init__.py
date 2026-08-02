@@ -13,7 +13,7 @@ def get_vad_model(
 ) -> VADModel:
     match settings.adapter:
         case "mlx:silero_vad":
-            from .mlx_audio.silero_vad import SileroVADModel
+            from .mlx_silero_vad import SileroVADModel
 
             return SileroVADModel(settings)
         case "openwakeword":

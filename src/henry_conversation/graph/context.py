@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from langgraph.runtime import Runtime
 
-from ..config import ConversationProfile, ConversationSettings
+from ..config import ConversationSettings
+from ..profile import ConversationProfile
 
 type ConversationRuntime = Runtime[ConversationContext]
 
@@ -28,7 +29,5 @@ class ConversationContext:
             opening_prompt=profile.prompts.opening,
             summary_prompt=profile.prompts.summary,
             acknowledgement_delay=settings.acknowledgement_delay,
-            classify_ambiguous=(
-                settings.classify_ambiguous and profile.models.classifier is not None
-            ),
+            classify_ambiguous=settings.classify_ambiguous,
         )

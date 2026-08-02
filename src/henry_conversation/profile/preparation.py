@@ -1,8 +1,7 @@
 from itertools import cycle
 
+from ..model import LanguageModelRole, LanguageModelService
 from .config import ConversationReactions
-from .domain import LanguageModelRole
-from .model import LanguageModelService
 
 
 class ProfilePreparation:

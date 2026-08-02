@@ -7,7 +7,6 @@ from langchain_core.runnables import RunnableConfig
 from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
 
-from .domain import ConversationTextChunk
 from .events import (
     CancelReply,
     ConversationActivated,
@@ -20,8 +19,8 @@ from .events import (
     UserTurn,
 )
 from .graph import ConversationContext, ConversationGraph
-from .preparation import ProfilePreparation
-from .reply import ReplySegmenter
+from .profile import ProfilePreparation
+from .reply import ConversationTextChunk, ReplySegmenter
 
 
 class Worker(Component):

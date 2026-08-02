@@ -1,22 +1,6 @@
-from __future__ import annotations
+from henry_common.events import EventBus
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from henry_common.events import EventBus
-
-from .config import ConversationProfile, ConversationReactions, ConversationSettings
-from .domain import (
-    ConversationMessage,
-    ConversationRole,
-    ConversationTextChunk,
-    LanguageModelChunk,
-    LanguageModelRequest,
-    LanguageModelRole,
-    ResponseMode,
-    ResponsePlan,
-    TurnIntent,
-)
+from .config import ConversationSettings
 from .events import (
     CancelReply,
     ConversationActivated,
@@ -27,6 +11,16 @@ from .events import (
     ReplyPhrase,
     UserTurn,
 )
+from .graph import ResponseMode, ResponsePlan, TurnIntent
+from .model import (
+    ConversationMessage,
+    ConversationRole,
+    LanguageModelChunk,
+    LanguageModelRequest,
+    LanguageModelRole,
+)
+from .profile import ConversationProfile, ConversationReactions
+from .reply import ConversationTextChunk
 
 __all__ = [
     "CancelReply",
@@ -62,11 +56,16 @@ async def run_conversation_worker(
 
     from .graph import ConversationContext, ConversationGraph, ConversationNodes
     from .model import LanguageModelService, get_language_model
-    from .preparation import ProfilePreparation
+    from .profile import ProfilePreparation
     from .worker import Worker
 
+    language_model = get_language_model(
+        profile,
+        settings.model,
+        require_classifier=settings.classify_ambiguous,
+    )
     context = ConversationContext.from_profile(profile, settings)
-    async with LanguageModelService(get_language_model(profile, settings)) as service:
+    async with LanguageModelService(language_model) as service:
         preparation = ProfilePreparation(service, profile.reactions)
         graph = ConversationGraph(
             nodes=ConversationNodes(service, profile_preparation=preparation),

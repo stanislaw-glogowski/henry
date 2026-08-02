@@ -32,7 +32,6 @@ from henry_speech.events import (
     TranscriptionProgressObserved,
 )
 from henry_speech.segmentation import SpeechSegment
-from henry_speech.synthesis import TTSProfile
 from henry_speech.transcription import TranscriptionChunk, TranscriptionText
 from henry_speech.worker import Worker, WorkerOptions
 
@@ -484,7 +483,7 @@ def test_public_speech_runner_composes_services(
         monkeypatch.setattr(Worker, "run", fake_run)
         profile = SpeechProfile(
             wakeword={"model": "wake.onnx"},
-            tts=TTSProfile(model="voice.onnx"),
+            tts={"voice_path": "voice.onnx"},
         )
         settings = SpeechSettings()
         catalog = object()

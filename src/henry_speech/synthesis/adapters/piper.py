@@ -6,22 +6,19 @@ from huggingface_hub.utils import disable_progress_bars
 from piper import PiperVoice, SynthesisConfig
 
 from ...audio import AudioFormat, AudioFrame
-from ..config import TTSProfile
+from ..config import PiperProfile, PiperSettings
 from ..ports import TTSModel
 
 
-class PiperTTSModel(TTSModel):
-    _REPOSITORY_ID: str = "rhasspy/piper-voices"
-    _LENGTH_SCALE: float = 1.05
-    _NOISE_SCALE: float | None = None
-    _NOISE_W_SCALE: float | None = None
-
+class PiperModel(TTSModel):
     def __init__(
         self,
-        profile: TTSProfile,
+        profile: PiperProfile,
+        settings: PiperSettings,
     ) -> None:
         super().__init__()
         self._profile = profile
+        self._settings = settings
         self._model: PiperVoice | None = None
 
     def synthesize(self, text: str) -> Iterator[AudioFrame]:
@@ -32,10 +29,12 @@ class PiperTTSModel(TTSModel):
             text=text,
             include_alignments=False,
             syn_config=SynthesisConfig(
-                length_scale=self._LENGTH_SCALE,
-                noise_scale=self._NOISE_SCALE,
-                noise_w_scale=self._NOISE_W_SCALE,
-                normalize_audio=True,
+                speaker_id=self._profile.speaker_id,
+                length_scale=self._profile.length_scale,
+                noise_scale=self._profile.noise_scale,
+                noise_w_scale=self._profile.noise_w_scale,
+                normalize_audio=self._settings.normalize_audio,
+                volume=self._settings.volume,
             ),
         )
 
@@ -58,18 +57,22 @@ class PiperTTSModel(TTSModel):
             raise RuntimeError("Piper voice model is already loaded")
 
         with disable_progress_bars():
+            repo_id = self._profile.repo_id or self._settings.repo_id
+            filename = self._profile.voice_path
+
             self._logger.debug(
-                "Loading model: model_path='{}'",
-                self._profile.model,
+                "Loading model: model_path='{}/{}'",
+                repo_id,
+                filename,
             )
 
             model_path = hf_hub_download(
-                repo_id=self._REPOSITORY_ID,
-                filename=self._profile.model,
+                repo_id=repo_id,
+                filename=filename,
             )
             config_path = hf_hub_download(
-                repo_id=self._REPOSITORY_ID,
-                filename=self._profile.model + ".json",
+                repo_id=repo_id,
+                filename=filename + ".json",
             )
 
             assert isinstance(model_path, str)

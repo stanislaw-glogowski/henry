@@ -3,8 +3,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from ...config import LanguageModelProfile, LanguageModelsProfile
-from ...domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
+from ..config import MLXModelProfile, MLXModelsProfile
+from ..domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
 from ..ports import LanguageModel
 
 
@@ -16,7 +16,7 @@ class _LoadedModel:
 
 
 class MLXLanguageModel(LanguageModel):
-    def __init__(self, profiles: LanguageModelsProfile) -> None:
+    def __init__(self, profiles: MLXModelsProfile) -> None:
         super().__init__()
         self._profiles = profiles
         self._models: dict[str, _LoadedModel] = {}
@@ -95,7 +95,7 @@ class MLXLanguageModel(LanguageModel):
 
     def _model(self, role: LanguageModelRole) -> _LoadedModel:
         profile = self._profile(role)
-        model_id = profile.model_for("mlx")
+        model_id = profile.model_id
         if loaded := self._models.get(model_id):
             return loaded
         if self._load is None:
@@ -156,7 +156,7 @@ class MLXLanguageModel(LanguageModel):
             return prompt, None
         return prompt_tokens[prefix_length:], copy.deepcopy(prompt_cache)
 
-    def _profile(self, role: LanguageModelRole) -> LanguageModelProfile:
+    def _profile(self, role: LanguageModelRole) -> MLXModelProfile:
         profile = getattr(self._profiles, role.value)
         if profile is None:
             raise RuntimeError(f"Language model role is not configured: {role!r}")

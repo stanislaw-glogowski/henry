@@ -5,7 +5,7 @@ from henry_resources.models import ModelCatalog
 from henry_speech.capture.ports import DetectionModel
 
 
-class OpenWakeWordONNXModel(DetectionModel, ABC):
+class BaseModel(DetectionModel, ABC):
     _MODELS_PATH = Path("openwakeword")
 
     def __init__(self, catalog: ModelCatalog, context: str | None = None):

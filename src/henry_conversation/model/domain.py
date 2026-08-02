@@ -14,20 +14,6 @@ class LanguageModelRole(StrEnum):
     CLASSIFIER = "classifier"
 
 
-class ResponseMode(StrEnum):
-    FAST = "fast"
-    DETAILED = "detailed"
-
-
-class TurnIntent(StrEnum):
-    DIRECT_RESPONSE = "direct_response"
-    ACKNOWLEDGE_THEN_RESPONSE = "acknowledge_then_response"
-    CLARIFY = "clarify"
-    COMMAND = "command"
-    CANCEL = "cancel"
-    NO_RESPONSE = "no_response"
-
-
 @dataclass(frozen=True, slots=True)
 class ConversationMessage:
     role: ConversationRole
@@ -43,16 +29,3 @@ class LanguageModelRequest:
 @dataclass(frozen=True, slots=True)
 class LanguageModelChunk:
     content: str
-
-
-@dataclass(frozen=True, slots=True)
-class ResponsePlan:
-    intent: TurnIntent
-    mode: ResponseMode
-    acknowledge: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class ConversationTextChunk:
-    content: str
-    acknowledgement: bool = False

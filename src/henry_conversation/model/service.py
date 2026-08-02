@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 from henry_common.components import AbstractAsyncService
 
-from ..domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
+from .domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
 from .ports import LanguageModel
 
 

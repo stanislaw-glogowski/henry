@@ -3,8 +3,8 @@ from henry_common.validation import ConfigModel
 from .audio import AudioSettings
 from .capture import VADSettings, WakeWordProfile, WakeWordSettings
 from .segmentation import SegmentationSettings
-from .synthesis import TTSProfile, TTSSettings
-from .transcription import STTProfile, STTSettings
+from .synthesis import TTSProfile, TTSSettings, default_tts_settings
+from .transcription import STTProfile, STTSettings, default_stt_settings
 
 
 class SpeechSettings(ConfigModel):
@@ -12,11 +12,9 @@ class SpeechSettings(ConfigModel):
     vad: VADSettings = VADSettings()
     wakeword: WakeWordSettings = WakeWordSettings()
     segmentation: SegmentationSettings = SegmentationSettings()
-    tts: TTSSettings = TTSSettings()
-    stt: STTSettings = STTSettings()
+    tts: TTSSettings = default_tts_settings()
+    stt: STTSettings = default_stt_settings()
 
 
-class SpeechProfile(ConfigModel):
+class SpeechProfile(TTSProfile, STTProfile):
     wakeword: WakeWordProfile
-    tts: TTSProfile
-    stt: STTProfile = STTProfile()
