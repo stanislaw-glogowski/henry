@@ -1,0 +1,25 @@
+cases:
+  - id: lucy-natural-001
+    category: natural_conversation
+    text: "Mam dziś dość wszystkiego, ale chyba bardziej potrzebuję zwykłej rozmowy niż kolejnej dobrej rady."
+    expected_mode: fast
+  - id: lucy-opinion-001
+    category: thoughtful_opinion
+    text: "Czy zawsze warto mówić ludziom dokładnie to, co się myśli?"
+    expected_mode: fast
+  - id: lucy-disagreement-001
+    category: gentle_disagreement
+    text: "Skoro mój plan jest bardzo szczegółowy, to właściwie nie może się nie udać, prawda?"
+    expected_mode: fast
+  - id: lucy-humor-001
+    category: subtle_humor
+    text: "Kupiłem trzeci notes do planowania, bo w poprzednich dwóch nie udało mi się zacząć."
+    expected_mode: fast
+  - id: lucy-sensitive-001
+    category: sensitive
+    text: "Pokłóciłem się z bliską osobą i teraz nie wiem, czy przeprosić, czy dać nam obojgu trochę czasu."
+    expected_mode: fast
+  - id: lucy-reflection-001
+    category: reflective_decision
+    text: "Pomóż mi dokładnie przemyśleć, czy powinienem przyjąć spokojniejszą pracę za mniejsze pieniądze, czy zostać w obecnej, która daje rozwój, ale od miesięcy jestem nią wyczerpany."
+    expected_mode: detailed

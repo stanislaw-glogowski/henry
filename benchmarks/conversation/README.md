@@ -40,13 +40,14 @@ library, so prepare models before an offline run.
 
 - `pl-core.yml` checks general short and detailed response routing.
 - `pl-henry.yml` checks the supplied Henry persona.
-- `pl-alexa.yml`, `pl-gizmo.yml`, and `pl-viki.yml` support local persona comparisons; the suites do not install
-  matching runtime profiles.
+- `pl-alexa.yml`, `pl-gizmo.yml`, `pl-lucy.yml`, and `pl-viki.yml` support local persona comparisons; the suites do
+  not install matching runtime profiles.
 
 Persona suites should be reviewed against the profile they name. Henry should remain useful, vary his situational irony,
 and stop joking in sensitive situations. Alexa should answer briefly and admit uncertainty instead of guessing. Gizmo
 should be genuinely funny for a child while separating facts from fiction and protecting privacy. Viki should sound vain
-and polished without belittling the user or inventing a public life.
+and polished without belittling the user or inventing a public life. Lucy should sound warm, perceptive, and natural,
+offer a real opinion when useful, use humor sparingly, and challenge weak assumptions without becoming argumentative.
 
 ## Measurements
 
