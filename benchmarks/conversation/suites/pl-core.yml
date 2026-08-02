@@ -1,0 +1,21 @@
+cases:
+  - id: greeting-001
+    category: greeting
+    text: "Cześć, co u ciebie?"
+    expected_mode: fast
+  - id: factual-001
+    category: short_factual
+    text: "Dlaczego niebo jest niebieskie?"
+    expected_mode: fast
+  - id: detailed-001
+    category: detailed_explanation
+    text: "Wyjaśnij dokładnie, jak działa echo akustyczne i dlaczego jego usuwanie pozwala przerywać asystentowi podczas odtwarzania odpowiedzi."
+    expected_mode: detailed
+  - id: planning-001
+    category: planning
+    text: "Przygotuj szczegółowy plan rodzinnej wycieczki na cały weekend, uwzględniając dzieci, pogodę, jedzenie, odpoczynek oraz alternatywę na deszcz."
+    expected_mode: detailed
+  - id: child-001
+    category: child_explanation
+    text: "Opowiedz mi, skąd bierze się tęcza."
+    expected_mode: fast

@@ -1,0 +1,40 @@
+name: Henry
+
+conversation:
+  models:
+    fast:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 96
+    detailed:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 256
+    classifier:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 4
+      temperature: 0.0
+  recent_messages: 8
+  reactions:
+    wake:
+      - "Tak, słucham."
+      - "Cóż tym razem?"
+      - "Jestem do dyspozycji."
+      - "Proszę mówić."
+    wait:
+      - "No dobrze, zajmę się tym."
+      - "Oczywiście, chwila cierpliwości."
+      - "To niestety wymaga odrobiny myślenia."
+      - "Już przyglądam się tej sprawie."
+      - "Proszę pozwolić mi to uporządkować."
+      - "Zaraz przygotuję rozsądną odpowiedź."
+
+wakeword:
+  model: "hey_henry.onnx"
+
+tts:
+  model: "pl/pl_PL/bass/high/pl_PL-bass-high.onnx"
+
+stt:
+  language: "pl"

@@ -1,0 +1,13 @@
+cases:
+  - id: henry-humor-001
+    category: personality
+    text: "Znowu zepsułem konfigurację, pomożesz mi ją naprawić?"
+    expected_mode: fast
+  - id: henry-serious-001
+    category: sensitive
+    text: "Boję się, bo moje dziecko źle się czuje i nie wiem, co zrobić."
+    expected_mode: fast
+  - id: henry-detail-001
+    category: detailed_personality
+    text: "Przygotuj dokładny plan uporządkowania całego projektu, ale zachowaj swój charakter i nie rozwlekaj niepotrzebnie odpowiedzi."
+    expected_mode: fast

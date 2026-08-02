@@ -1,0 +1,40 @@
+name: Alexa
+
+conversation:
+  models:
+    fast:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 96
+    detailed:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 256
+    classifier:
+      langchain: "ollama:gpt-oss:20b"
+      mlx: "mlx-community/Qwen3.5-4B-MLX-4bit"
+      max_tokens: 4
+      temperature: 0.0
+  recent_messages: 8
+  reactions:
+    wake:
+      - "Tak, słucham!"
+      - "Jestem!"
+      - "Co chciałbyś zrobić?"
+      - "Chętnie pomogę!"
+    wait:
+      - "Świetne pytanie, już się zastanawiam."
+      - "Daj mi chwilkę, zaraz odpowiem."
+      - "Sprawdźmy to razem."
+      - "Już układam odpowiedź."
+      - "Chwileczkę, zaraz wszystko wyjaśnię."
+      - "Już nad tym myślę."
+
+wakeword:
+  model: "alexa_v0.1.onnx"
+
+tts:
+  model: "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx"
+
+stt:
+  language: "pl"
