@@ -1,12 +1,13 @@
 import asyncio
 from contextlib import suppress
 
-from langchain.messages import AIMessageChunk, HumanMessage
+from langchain.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from henry_common.components import Component
 from henry_common.events import EventBus, ShutdownEvent
 
+from .domain import ConversationTextChunk
 from .events import (
     CancelReply,
     ConversationActivated,
@@ -18,8 +19,9 @@ from .events import (
     ReplyPhrase,
     UserTurn,
 )
-from .graph import ConversationContext, ConversationGraph, ConversationNodes
-from .reply_segmentation import ReplySegmenter
+from .graph import ConversationContext, ConversationGraph
+from .preparation import ProfilePreparation
+from .reply import ReplySegmenter
 
 
 class Worker(Component):
@@ -30,11 +32,13 @@ class Worker(Component):
         event_bus: EventBus,
         graph: ConversationGraph,
         context: ConversationContext,
+        profile_preparation: ProfilePreparation | None = None,
     ) -> None:
         super().__init__()
         self._event_bus = event_bus
         self._graph = graph
         self._context = context
+        self._profile_preparation = profile_preparation
         self._graph_queue: asyncio.Queue[ConversationInput] = asyncio.Queue()
         self._active_reply: asyncio.Task[None] | None = None
         self._delivery_context = ""
@@ -49,12 +53,25 @@ class Worker(Component):
                 group.create_task(self._events_loop()),
                 group.create_task(self._graph_loop()),
             ]
+            if self._profile_preparation is not None:
+                tasks.append(group.create_task(self._prepare_profile()))
 
             await self._shutdown_event.wait()
             self._logger.debug("Canceling tasks")
 
             for task in tasks:
                 task.cancel()
+
+    async def _prepare_profile(self) -> None:
+        preparation = self._profile_preparation
+        if preparation is None:
+            return
+        try:
+            await preparation.prepare()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._logger.warning("Profile preparation FAILED: {}", error)
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(
@@ -140,18 +157,16 @@ class Worker(Component):
         }
         segmenter = ReplySegmenter()
 
-        async for message, metadata in self._graph.compiled.astream(
+        async for event in self._graph.compiled.astream(
             input=graph_input,
             config=config,
             context=self._context,
-            stream_mode="messages",
+            stream_mode="custom",
         ):
-            if metadata.get("langgraph_node") not in ConversationNodes.RESPONSE_NODES:
-                continue
-            if not isinstance(message, AIMessageChunk):
+            if not isinstance(event, ConversationTextChunk):
                 continue
 
-            chunk = message.text
+            chunk = event.content
             if not chunk:
                 continue
 

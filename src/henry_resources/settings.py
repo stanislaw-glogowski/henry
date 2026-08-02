@@ -4,10 +4,12 @@ from pathlib import Path
 import yaml
 
 from henry_common.validation import ConfigModel
+from henry_conversation.config import ConversationSettings
 from henry_speech.config import SpeechSettings
 
 
 class Settings(ConfigModel):
+    conversation: ConversationSettings = ConversationSettings()
     speech: SpeechSettings = SpeechSettings()
 
     @staticmethod

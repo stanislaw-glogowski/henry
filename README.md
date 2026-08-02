@@ -18,7 +18,8 @@ adapters.
 - Fully local voice pipeline with no cloud inference.
 - Streaming OpenWakeWord detection with Silero VAD.
 - Multilingual Parakeet speech recognition, including Polish.
-- Conversation history and summarization with LangGraph and local Ollama.
+- Conversation history, adaptive response depth, and summarization with LangGraph.
+- Direct MLX-LM and LangChain language-model adapters with role-specific models.
 - Phrase-streamed Piper speech synthesis.
 - Adaptive acoustic and semantic turn endpointing.
 - Native macOS voice processing with acoustic echo cancellation, soft ducking,
@@ -34,7 +35,7 @@ Microphone -> Apple Voice Processing (AEC, NS, AGC) -> native PCM channel 0
   -> Silero VAD + OpenWakeWord
   -> adaptive utterance segmentation
   -> Parakeet STT + semantic continuation detection
-  -> LangGraph + Ollama
+  -> response routing + LangGraph + LangChain or MLX-LM
   -> speakable phrase segmentation
   -> Piper TTS (22.05 kHz)
   -> speakers
@@ -43,6 +44,13 @@ Microphone -> Apple Voice Processing (AEC, NS, AGC) -> native PCM channel 0
 Henry begins in wake-word mode. Activation starts a finite LangGraph run that generates a greeting from the conversation
 summary and recent messages. The voice session then remains active for follow-up utterances. Each user turn runs the
 reply and summary nodes and stores its state under the in-process `thread_id="default"`.
+
+Short turns use the fast model. Longer or multi-part turns use the detailed
+model. The active profile prepares short wake-word and waiting reactions in the
+background. A ready wake reaction avoids model latency during activation, while
+a waiting reaction is emitted only when a detailed response misses the configured
+delay. These reactions are delivery context and are not added to semantic
+conversation history.
 
 Model text is divided at natural phrase boundaries so TTS can start before the
 whole response exists. During playback, likely user speech first lowers the
@@ -152,7 +160,7 @@ The data directory is resolved in this order:
 
 Local `.henry` data and downloaded models are not part of the Python package.
 
-The default profile uses a fixed directory contract:
+Profiles use a fixed directory contract:
 
 ```text
 .henry/profiles/default/
@@ -164,6 +172,10 @@ The default profile uses a fixed directory contract:
 ```
 
 Prompt paths are not configurable. Persona, conversation opening, and summary behavior belong to these profile files.
+Versioned Henry and Alexa templates are available in `examples/profiles`. Copy
+the selected directories into `.henry/profiles` and keep local model or voice
+changes outside version control. Henry is a dry, world-weary but dependable
+butler; Alexa is a warm and imaginative assistant intended for children.
 
 ## 🚀 Running Henry
 
@@ -188,6 +200,28 @@ speech:
     short_utterance_end_silence_frames: 28
     max_utterance_frames: 1875
 ```
+
+The conversation adapter is selected independently:
+
+```yaml
+conversation:
+  adapter: langchain       # or mlx
+  acknowledgement_delay: 0.5
+  classify_ambiguous: false
+```
+
+Each profile maps the `fast`, `detailed`, and optional `classifier` roles to
+adapter-specific model identifiers. The supplied templates use the existing
+`ollama:gpt-oss:20b` LangChain baseline and
+`mlx-community/Qwen3.5-4B-MLX-4bit` for every MLX role on an M1 Max with 64 GB
+of unified memory. Roles that use the same model share one loaded instance.
+Model weights are not included in the repository. Enable ambiguous-turn
+classification after selecting the MLX adapter to classify without adding a
+full Ollama round trip. Supplied profiles keep thinking mode disabled so
+ordinary spoken replies do not begin with a long silent reasoning phase.
+The MLX adapter also caches the stable persona prefix and copies that cache for
+each generation; mutable summaries and conversation messages remain outside the
+shared cache.
 
 Use `driver: pyaudio` as a fallback when native voice processing is not
 available. Developers can point at a separately built helper with
@@ -233,7 +267,10 @@ playback, and control queues. Blocking operations remain with their owners:
 - the speech capture worker owns Silero VAD and OpenWakeWord;
 - STT owns Parakeet and its MLX runtime;
 - TTS owns Piper;
-- conversation calls the local Ollama model through LangChain.
+- conversation owns one language-model executor and keeps model loading,
+  generation, and closing in that same thread;
+- the selected conversation adapter owns either the local LangChain model or
+  direct MLX-LM inference.
 
 Async pipeline boundaries use `asyncio.Queue`. Dedicated ML worker threads
 return results through futures and `loop.call_soon_threadsafe(...)`; the native
@@ -310,6 +347,17 @@ difference between the two runs to evaluate echo suppression on one device
 setup.
 
 ### Automated verification
+
+Conversation model latency and routing can be measured without audio:
+
+```bash
+uv run python -m tools.conversation_benchmark --adapter langchain
+uv run python -m tools.conversation_benchmark --adapter mlx
+```
+
+See `benchmarks/conversation/README.md` for the Polish source suite, report
+format, and human listening criteria. Generated results are local artifacts and
+must not be committed.
 
 Run the complete automated verification:
 

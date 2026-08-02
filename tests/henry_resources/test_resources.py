@@ -17,7 +17,13 @@ def write_profile(root: Path, name: str = "default") -> Path:
         """
 name: Henry
 conversation:
-  model: ollama:gpt-oss:20b
+  models:
+    fast:
+      langchain: ollama:gpt-oss:20b
+      mlx: Qwen/Qwen3-8B-MLX-4bit
+    detailed:
+      langchain: ollama:gpt-oss:20b
+      mlx: Qwen/Qwen3-14B-MLX-4bit
   recent_messages: 6
 wakeword:
   model: wakeword.onnx
@@ -133,3 +139,17 @@ def test_settings_and_profile_validation(tmp_path: Path) -> None:
     )
     with pytest.raises(ValidationError, match="ONNX"):
         Profile.load_from_directory(profile_path)
+
+
+def test_versioned_henry_and_alexa_profiles_are_valid_and_distinct() -> None:
+    root = Path(__file__).parents[2] / "examples" / "profiles"
+    henry = Profile.load_from_directory(root / "default")
+    alexa = Profile.load_from_directory(root / "alexa")
+
+    assert henry.name == "Henry"
+    assert alexa.name == "Alexa"
+    assert "world-weary" in henry.conversation.prompts.system
+    assert "conversation with a child" in alexa.conversation.prompts.system
+    expected_mlx_model = "mlx-community/Qwen3.5-4B-MLX-4bit"
+    assert henry.conversation.models.fast.mlx == expected_mlx_model
+    assert alexa.conversation.models.detailed.mlx == expected_mlx_model

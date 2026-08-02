@@ -13,6 +13,7 @@ dependencies = [
     "langgraph>=1.2.10",
     "loguru>=0.7.3",
     "mlx-audio>=0.4.6",
+    "mlx-lm>=0.30.6",
     "mlx>=0.32.0",
     "numpy>=2.5.1",
     "onnxruntime>=1.28.0,<2",

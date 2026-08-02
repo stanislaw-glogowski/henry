@@ -43,10 +43,10 @@ def frame(value: float = 0.1):
     return FORMAT.build_frame(np.asarray([value], dtype=np.float32))
 
 
-def speech_chunk(*, wakeword: bool = False) -> SpeechChunk:
+def speech_chunk(*, speech: bool = True, wakeword: bool = False) -> SpeechChunk:
     return SpeechChunk(
         audio=frame(),
-        vad=DetectionResult(score=0.8, detected=True),
+        vad=DetectionResult(score=0.8 if speech else 0.1, detected=speech),
         wakeword=DetectionResult(score=0.9, detected=wakeword),
     )
 
@@ -164,7 +164,8 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
                 1,
             )
 
-            capture.queue.put_nowait(speech_chunk(wakeword=True))
+            # Wake-word inference may complete after VAD has fallen on this frame.
+            capture.queue.put_nowait(speech_chunk(speech=False, wakeword=True))
             activation = await asyncio.wait_for(requests.__anext__(), 1)
             requests.task_done()
             assert activation == GenerateReply(ConversationActivated())

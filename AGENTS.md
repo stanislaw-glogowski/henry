@@ -61,6 +61,13 @@ events are `ReplyGenerationStarted` and `ReplyGenerationCompleted`; they describ
 Speech confirms delivery only after every audio frame for a phrase has played. When interrupted, the next graph run
 receives the conservative prefix that the user certainly heard.
 
+Conversation models are accessed through `LanguageModel` and owned by one
+`LanguageModelService` executor. The `langchain` and `mlx` adapters map the
+profile's fast, detailed, and optional classifier roles without leaking provider
+types into graph nodes. Prepared wake-word and waiting reactions are delivery-only
+text; they must not become semantic conversation history or move TTS ownership out
+of `henry_speech`.
+
 Utterance endpointing has two layers. `UtteranceSegmenter` owns frame-based start, adaptive trailing-silence, pre-roll,
 and maximum-duration rules. `TurnEndpointDetector` may join a semantically incomplete transcription with the next
 utterance; it must not start speculative language-model work.
@@ -119,6 +126,10 @@ belong below `HENRY_HOME/benchmarks`; never commit them. A displayed benchmark
 prompt is ground truth, while model transcription remains a separate result.
 Adapter candidates stay lazy and must not become production defaults before a
 recorded Polish benchmark and, for TTS, a blind listening review.
+
+Conversation model benchmark source and committed Polish suites belong in
+`tools/conversation_benchmark` and `benchmarks/conversation`. Generated model
+outputs and review reports follow the same `HENRY_HOME/benchmarks` rule.
 
 Swift protocol and value behavior belongs in `native/macos/henry-audio/Tests`. Real microphone, speaker, AEC, gain-ramp,
 Metal, and model validation remains a separate manual gate.

@@ -3,7 +3,6 @@ import signal
 
 from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation import run_conversation_worker
-from henry_conversation.graph import ConversationContext
 from henry_resources import LocalStore
 from henry_speech import run_speech_worker
 
@@ -22,16 +21,19 @@ async def run() -> None:
     local_store = LocalStore()
     profile = local_store.load_profile("default")
     settings = local_store.load_settings()
-    conversation_context = ConversationContext.from_profile(
-        profile.conversation,
-    )
 
     with EventBus() as event_bus:
         configure_shutdown(event_bus)
 
         async with asyncio.TaskGroup() as tasks:
             tasks.create_task(run_event_logger(event_bus))
-            tasks.create_task(run_conversation_worker(event_bus, conversation_context))
+            tasks.create_task(
+                run_conversation_worker(
+                    event_bus,
+                    profile.conversation,
+                    settings.conversation,
+                )
+            )
             tasks.create_task(
                 run_speech_worker(profile, settings.speech, local_store, event_bus)
             )

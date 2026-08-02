@@ -58,6 +58,7 @@ def test_pyaudio_adapter_package_exports_concrete_types() -> None:
 
 def test_capture_domain_and_telemetry_events() -> None:
     speech = chunk(speech=True, wakeword=True)
+    delayed_wakeword = chunk(speech=False, wakeword=True)
     silence = SpeechChunk(
         audio=frame(0.0),
         vad=DetectionResult(),
@@ -65,6 +66,8 @@ def test_capture_domain_and_telemetry_events() -> None:
     )
     assert speech.is_speech
     assert speech.is_wakeword
+    assert not delayed_wakeword.is_speech
+    assert delayed_wakeword.is_wakeword
     assert not silence.is_speech
     assert not silence.is_wakeword
     assert VADObserved.from_chunk(speech) == VADObserved(score=0.8, detected=True)

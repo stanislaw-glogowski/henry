@@ -1,8 +1,22 @@
-from langchain.chat_models import init_chat_model
-from langchain.messages import AnyMessage, SystemMessage
-from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import PromptTemplate
+import asyncio
+from contextlib import suppress
 
+from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import PromptTemplate
+from langgraph.config import get_stream_writer
+
+from ..domain import (
+    ConversationMessage,
+    ConversationRole,
+    ConversationTextChunk,
+    LanguageModelRequest,
+    LanguageModelRole,
+    ResponseMode,
+    ResponsePlan,
+)
+from ..model import LanguageModelService
+from ..preparation import ProfilePreparation
+from ..routing import ResponseRouter
 from .context import ConversationContext, ConversationRuntime
 from .state import ConversationState
 
@@ -11,10 +25,16 @@ class ConversationNodes:
     OPENING = "opening"
     REPLY = "reply"
     SUMMARIZE = "summarize"
-    RESPONSE_NODES = frozenset((OPENING, REPLY))
 
-    def __init__(self) -> None:
-        self._models: dict[str, BaseChatModel] = {}
+    def __init__(
+        self,
+        language_model: LanguageModelService,
+        response_router: ResponseRouter | None = None,
+        profile_preparation: ProfilePreparation | None = None,
+    ) -> None:
+        self._language_model = language_model
+        self._response_router = response_router or ResponseRouter()
+        self._profile_preparation = profile_preparation
 
     async def opening(
         self,
@@ -22,39 +42,82 @@ class ConversationNodes:
         runtime: ConversationRuntime,
     ) -> dict[str, list[AnyMessage] | str]:
         context = runtime.context
+        if self._profile_preparation is not None and (
+            reaction := self._profile_preparation.next_wake_reaction()
+        ):
+            get_stream_writer()(ConversationTextChunk(f"{reaction}\n", True))
+            return {"messages": [], "delivery_context": ""}
+
         summary = state.get("summary", "")
         messages = state.get("messages", [])[-context.recent_messages :]
-        system_prompt = self._format_system_prompt(context, summary)
         opening_prompt = PromptTemplate.from_template(context.opening_prompt).format(
             conversation_summary=summary or "No previous conversation.",
             recent_conversation=self._format_messages(messages),
         )
-        response = await self._model(context).ainvoke(
-            [
-                SystemMessage(content=system_prompt),
-                SystemMessage(content=opening_prompt),
-                *self._delivery_messages(state),
-                *messages,
-            ]
+        request = LanguageModelRequest(
+            LanguageModelRole.FAST,
+            self._request_messages(
+                state,
+                context,
+                summary,
+                [*messages, HumanMessage(content=opening_prompt)],
+            ),
         )
-        return {"messages": [response], "delivery_context": ""}
+        response = await self._stream_visible(request)
+        return {"messages": [AIMessage(response)], "delivery_context": ""}
 
     async def reply(
         self,
         state: ConversationState,
         runtime: ConversationRuntime,
-    ) -> dict[str, list[AnyMessage] | str]:
+    ) -> dict[str, list[AnyMessage]]:
         context = runtime.context
         summary = state.get("summary", "")
         messages = state["messages"][-context.recent_messages :]
-        response = await self._model(context).ainvoke(
-            [
-                SystemMessage(content=self._format_system_prompt(context, summary)),
-                *self._delivery_messages(state),
-                *messages,
-            ]
+        user_text = next(
+            (
+                message.text
+                for message in reversed(messages)
+                if isinstance(message, HumanMessage)
+            ),
+            "",
         )
-        return {"messages": [response]}
+        plan = self._response_router.plan(user_text)
+        if context.classify_ambiguous and self._response_router.is_ambiguous(user_text):
+            plan = await self._classify(user_text)
+        role = (
+            LanguageModelRole.DETAILED
+            if plan.mode is ResponseMode.DETAILED
+            else LanguageModelRole.FAST
+        )
+        request = LanguageModelRequest(
+            role,
+            self._request_messages(state, context, summary, messages),
+        )
+        response = await self._stream_visible(
+            request,
+            acknowledgement_delay=(
+                context.acknowledgement_delay if plan.acknowledge else None
+            ),
+        )
+        return {"messages": [AIMessage(response)]}
+
+    async def _classify(self, text: str) -> ResponsePlan:
+        classification = ""
+        async for chunk in self._language_model.generate(
+            LanguageModelRequest(
+                LanguageModelRole.CLASSIFIER,
+                (
+                    ConversationMessage(
+                        ConversationRole.SYSTEM,
+                        self._response_router.CLASSIFICATION_PROMPT,
+                    ),
+                    ConversationMessage(ConversationRole.USER, text),
+                ),
+            )
+        ):
+            classification += chunk.content
+        return self._response_router.classified_plan(classification)
 
     async def summarize(
         self,
@@ -68,37 +131,114 @@ class ConversationNodes:
                 state["messages"][-context.recent_messages :]
             ),
         )
-        response = await self._model(context).ainvoke(
-            [*self._delivery_messages(state), SystemMessage(content=summary_prompt)]
-        )
-        return {"summary": response.text, "delivery_context": ""}
+        content = ""
+        async for chunk in self._language_model.generate(
+            LanguageModelRequest(
+                LanguageModelRole.FAST,
+                self._domain_messages(
+                    [
+                        *self._delivery_messages(state),
+                        HumanMessage(content=summary_prompt),
+                    ]
+                ),
+            )
+        ):
+            content += chunk.content
+        return {"summary": content, "delivery_context": ""}
 
-    def _model(self, context: ConversationContext) -> BaseChatModel:
-        if model := self._models.get(context.model):
-            return model
+    async def _stream_visible(
+        self,
+        request: LanguageModelRequest,
+        acknowledgement_delay: float | None = None,
+    ) -> str:
+        writer = get_stream_writer()
+        content = ""
+        stream = self._language_model.generate(request)
+        if acknowledgement_delay is not None:
+            first_chunk = asyncio.create_task(anext(stream))
+            try:
+                chunk = await asyncio.wait_for(
+                    asyncio.shield(first_chunk), acknowledgement_delay
+                )
+            except TimeoutError:
+                if self._profile_preparation is not None and (
+                    reaction := self._profile_preparation.next_reaction()
+                ):
+                    writer(ConversationTextChunk(f"{reaction}\n", True))
+                chunk = await first_chunk
+            except StopAsyncIteration:
+                return content
+            except asyncio.CancelledError:
+                first_chunk.cancel()
+                with suppress(asyncio.CancelledError):
+                    await first_chunk
+                await stream.aclose()
+                raise
+            content += chunk.content
+            writer(ConversationTextChunk(chunk.content))
 
-        model = init_chat_model(
-            context.model,
-            temperature=0,
-            base_url="http://localhost:11434",
-        )
-        self._models[context.model] = model
-        return model
+        async for chunk in stream:
+            content += chunk.content
+            writer(ConversationTextChunk(chunk.content))
+        return content
 
-    @staticmethod
-    def _format_system_prompt(
+    @classmethod
+    def _request_messages(
+        cls,
+        state: ConversationState,
         context: ConversationContext,
         summary: str,
-    ) -> str:
-        return PromptTemplate.from_template(context.system_prompt).format(
-            conversation_summary=summary or "No previous conversation.",
+        messages: list[AnyMessage],
+    ) -> tuple[ConversationMessage, ...]:
+        return cls._domain_messages(
+            [
+                SystemMessage(
+                    content=PromptTemplate.from_template(context.system_prompt).format(
+                        conversation_summary=(
+                            "The current conversation summary is supplied in the "
+                            "next system message."
+                        )
+                    )
+                ),
+                SystemMessage(
+                    content="Conversation summary: "
+                    f"{summary or 'No previous conversation.'}"
+                ),
+                *cls._delivery_messages(state),
+                *messages,
+            ]
+        )
+
+    @staticmethod
+    def _domain_messages(
+        messages: list[AnyMessage],
+    ) -> tuple[ConversationMessage, ...]:
+        roles = {
+            "system": ConversationRole.SYSTEM,
+            "human": ConversationRole.USER,
+            "ai": ConversationRole.ASSISTANT,
+        }
+        system_content = "\n\n".join(
+            message.text
+            for message in messages
+            if message.type == "system" and message.text
+        )
+        conversation = tuple(
+            ConversationMessage(roles[message.type], message.text)
+            for message in messages
+            if message.type != "system" and message.text
+        )
+        if not system_content:
+            return conversation
+        return (
+            ConversationMessage(ConversationRole.SYSTEM, system_content),
+            *conversation,
         )
 
     @staticmethod
     def _format_messages(messages: list[AnyMessage]) -> str:
         if not messages:
             return "No recent conversation."
-
         return "\n".join(
             f"{message.type}: {message.text}" for message in messages if message.text
         )
@@ -106,6 +246,4 @@ class ConversationNodes:
     @staticmethod
     def _delivery_messages(state: ConversationState) -> list[SystemMessage]:
         context = state.get("delivery_context", "")
-        if not context:
-            return []
-        return [SystemMessage(content=context)]
+        return [SystemMessage(content=context)] if context else []

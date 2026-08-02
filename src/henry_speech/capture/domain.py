@@ -21,4 +21,4 @@ class SpeechChunk:
 
     @property
     def is_wakeword(self) -> bool:
-        return self.is_speech and self.wakeword is not None and self.wakeword.detected
+        return self.wakeword is not None and self.wakeword.detected

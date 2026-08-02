@@ -1,14 +1,15 @@
 import asyncio
+import sys
 from collections.abc import AsyncIterator
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
-from langchain.messages import AIMessageChunk, HumanMessage
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 
-import henry_conversation.graph.nodes as nodes_module
+import henry_conversation.model as model_module
 from henry_common.events import EventBus, ShutdownEvent
 from henry_conversation import (
     CancelReply,
@@ -21,33 +22,83 @@ from henry_conversation import (
     UserTurn,
     run_conversation_worker,
 )
-from henry_conversation.config import ConversationProfile, ConversationPrompts
+from henry_conversation.config import (
+    ConversationProfile,
+    ConversationPrompts,
+    ConversationReactions,
+    ConversationSettings,
+    LanguageModelProfile,
+    LanguageModelsProfile,
+)
+from henry_conversation.domain import (
+    ConversationMessage,
+    ConversationRole,
+    ConversationTextChunk,
+    LanguageModelChunk,
+    LanguageModelRequest,
+    LanguageModelRole,
+    ResponseMode,
+    TurnIntent,
+)
 from henry_conversation.graph import (
     ConversationContext,
     ConversationGraph,
     ConversationNodes,
 )
-from henry_conversation.reply_segmentation import ReplySegmenter
+from henry_conversation.model import LanguageModelService, get_language_model
+from henry_conversation.model.adapters.langchain import LangChainLanguageModel
+from henry_conversation.model.adapters.mlx import MLXLanguageModel
+from henry_conversation.preparation import ProfilePreparation
+from henry_conversation.reply import ReplySegmenter
+from henry_conversation.routing import ResponseRouter
 from henry_conversation.worker import Worker
+from tests.support import FakeLanguageModel
 
 
-def context() -> ConversationContext:
-    profile = ConversationProfile(
-        model="test:model",
+def profile() -> ConversationProfile:
+    return ConversationProfile(
+        models=LanguageModelsProfile(
+            fast=LanguageModelProfile(
+                langchain="test:fast", mlx="test/fast", max_tokens=96
+            ),
+            detailed=LanguageModelProfile(
+                langchain="test:detailed", mlx="test/detailed", max_tokens=256
+            ),
+            classifier=LanguageModelProfile(
+                langchain="test:classifier", mlx="test/classifier", max_tokens=4
+            ),
+        ),
         recent_messages=4,
         prompts=ConversationPrompts(
-            system="System Polish {conversation_summary}",
-            opening="Opening Polish {conversation_summary} {recent_conversation}",
+            system="System {conversation_summary}",
+            opening="Opening {conversation_summary} {recent_conversation}",
             summary="Summary {conversation_summary} {recent_conversation}",
         ),
     )
-    return ConversationContext.from_profile(profile)
 
 
-def test_config_context_and_events() -> None:
-    value = context()
-    assert value.model == "test:model"
-    assert value.recent_messages == 4
+def context(delay: float = 0.5) -> ConversationContext:
+    return ConversationContext.from_profile(
+        profile(), ConversationSettings(acknowledgement_delay=delay)
+    )
+
+
+def test_configuration_domain_events_and_routing() -> None:
+    value = profile()
+    assert value.models.fast.model_for("mlx") == "test/fast"
+    assert value.models.detailed.max_tokens == 256
+    with pytest.raises(ValueError, match="No model"):
+        LanguageModelProfile(langchain="only").model_for("mlx")
+    with pytest.raises(ValidationError, match="At least one"):
+        LanguageModelProfile()
+    with pytest.raises(ValidationError):
+        ConversationReactions(wake=("",))
+    with pytest.raises(ValidationError):
+        ConversationProfile(
+            models=value.models,
+            recent_messages=1,
+            prompts=value.prompts,
+        )
 
     activation = ConversationActivated()
     turn = UserTurn("Hello")
@@ -59,17 +110,25 @@ def test_config_context_and_events() -> None:
     assert ReplyGenerationStarted() == ReplyGenerationStarted()
     assert ReplyGenerationCompleted() == ReplyGenerationCompleted()
 
-    with pytest.raises(ValidationError):
-        ConversationProfile(
-            model="",
-            recent_messages=1,
-            prompts=ConversationPrompts(system="s", opening="o", summary="m"),
-        )
+    router = ResponseRouter()
+    assert router.plan("").intent is TurnIntent.NO_RESPONSE
+    assert router.plan("short question").mode is ResponseMode.FAST
+    detailed = router.plan(" ".join(f"word{index}" for index in range(24)))
+    assert detailed.mode is ResponseMode.DETAILED
+    assert detailed.acknowledge
+    assert router.plan("one two three four five six seven eight? nine ten? ").mode is (
+        ResponseMode.DETAILED
+    )
+    assert router.plan(" ".join("word" for _ in range(18))).mode is ResponseMode.FAST
+    assert router.is_ambiguous(" ".join("word" for _ in range(18)))
+    assert router.is_ambiguous("tell me a longer story")
+    assert not router.is_ambiguous("what time is it?")
+    assert router.classified_plan(" detailed ").mode is ResponseMode.DETAILED
+    assert router.classified_plan("unexpected").mode is ResponseMode.FAST
 
 
-def test_reply_segmenter_emits_natural_phrases() -> None:
+def test_reply_segmenter_emits_natural_phrases_and_validates_limits() -> None:
     segmenter = ReplySegmenter(soft_limit=20, hard_limit=40)
-
     assert segmenter.feed("Tak. Kolejna wartość to 3.14, a np.") == (
         "Tak.",
         "Kolejna wartość to 3.14,",
@@ -82,139 +141,232 @@ def test_reply_segmenter_emits_natural_phrases() -> None:
     )
     assert segmenter.flush() == ("którą można już wypowiedzieć",)
 
-
-def test_reply_segmenter_handles_newlines_quotes_limits_and_validation() -> None:
-    segmenter = ReplySegmenter(soft_limit=10, hard_limit=12)
-
-    assert segmenter.feed('"Gotowe!"\nNastępna długa fraza bez końca') == (
+    quoted = ReplySegmenter(soft_limit=10, hard_limit=12)
+    assert quoted.feed('"Gotowe!"\nNastępna długa fraza bez końca') == (
         '"Gotowe!"',
         "Następna długa",
     )
-    assert segmenter.flush() == ("fraza bez końca",)
-
+    assert quoted.flush() == ("fraza bez końca",)
     protected = ReplySegmenter()
     assert protected.feed("Model U.S. działa przy wersji 3.14 i nazwie x.y") == ()
     assert protected.flush() == ("Model U.S. działa przy wersji 3.14 i nazwie x.y",)
-
     with pytest.raises(ValueError, match="limits"):
         ReplySegmenter(soft_limit=10, hard_limit=5)
     with pytest.raises(ValueError, match="limits"):
         ReplySegmenter(soft_limit=0)
 
 
-def test_nodes_build_prompts_and_cache_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_language_model_service_owns_resources_and_streams() -> None:
     async def scenario() -> None:
-        fake = FakeListChatModel(responses=["Opening", "Reply", "New summary"])
-        created: list[tuple[str, dict[str, Any]]] = []
+        adapter = FakeLanguageModel("Answer")
+        service = LanguageModelService(adapter)
+        request = LanguageModelRequest(
+            LanguageModelRole.FAST,
+            (ConversationMessage(ConversationRole.USER, "Question"),),
+        )
+        with pytest.raises(RuntimeError, match="not started"):
+            await service.prepare(LanguageModelRole.FAST)
+        async with service:
+            await service.prepare(LanguageModelRole.FAST)
+            chunks = [chunk async for chunk in service.generate(request)]
+        assert "".join(chunk.content for chunk in chunks) == "Answer"
+        assert adapter.requests == [request]
+        thread_ids = {thread_id for _, thread_id in adapter.operations}
+        assert len(thread_ids) == 1
 
-        def create_model(model: str, **kwargs: Any) -> FakeListChatModel:
-            created.append((model, kwargs))
-            return fake
+        await service.stop()
 
-        monkeypatch.setattr(nodes_module, "init_chat_model", create_model)
-        nodes = ConversationNodes()
-        runtime = type("Runtime", (), {"context": context()})()
-        state = {
-            "messages": [HumanMessage("Earlier")],
-            "summary": "Old subject",
-            "input_kind": "activation",
-        }
+    asyncio.run(scenario())
 
-        opening = await nodes.opening(state, runtime)
-        reply = await nodes.reply(state, runtime)
-        summary = await nodes.summarize(state, runtime)
 
-        assert opening["messages"][0].text == "Opening"
-        assert reply["messages"][0].text == "Reply"
-        assert summary == {"summary": "New summary", "delivery_context": ""}
-        assert created == [
-            (
-                "test:model",
-                {"temperature": 0, "base_url": "http://localhost:11434"},
+def test_language_model_service_propagates_generation_error() -> None:
+    class FailingModel(FakeLanguageModel):
+        def generate(self, request: LanguageModelRequest):
+            raise RuntimeError("generation failed")
+            yield
+
+    async def scenario() -> None:
+        async with LanguageModelService(FailingModel()) as service:
+            with pytest.raises(RuntimeError, match="generation failed"):
+                _ = [
+                    chunk
+                    async for chunk in service.generate(
+                        LanguageModelRequest(LanguageModelRole.FAST, ())
+                    )
+                ]
+
+    asyncio.run(scenario())
+
+
+def test_profile_preparation_generates_rotating_reactions() -> None:
+    async def scenario() -> None:
+        model = FakeLanguageModel()
+        async with LanguageModelService(model) as service:
+            preparation = ProfilePreparation(
+                service,
+                ConversationReactions(
+                    wake=("Wake one.", "Wake two."),
+                    wait=("Wait one.", "Wait two."),
+                ),
             )
-        ]
-        assert nodes._format_messages([]) == "No recent conversation."
-        assert "human: Earlier" in nodes._format_messages(state["messages"])
+            await preparation.prepare()
+            assert [preparation.next_reaction() for _ in range(3)] == [
+                "Wait one.",
+                "Wait two.",
+                "Wait one.",
+            ]
+            assert [preparation.next_wake_reaction() for _ in range(3)] == [
+                "Wake one.",
+                "Wake two.",
+                "Wake one.",
+            ]
+        assert any(
+            operation == f"prepare:{LanguageModelRole.FAST}"
+            for operation, _ in model.operations
+        )
 
     asyncio.run(scenario())
 
 
-def test_graph_routes_and_preserves_default_thread_history() -> None:
+def test_graph_routes_streams_and_preserves_thread_history() -> None:
     async def scenario() -> None:
-        nodes = ConversationNodes()
-        nodes._models["test:model"] = FakeListChatModel(
-            responses=["Welcome", "Answer", "Remembered", "Welcome back"]
-        )
-        graph = ConversationGraph(nodes, InMemorySaver()).compiled
-        config = {"configurable": {"thread_id": "default"}}
+        adapter = FakeLanguageModel("Welcome", "Answer", "Remembered", "Welcome back")
+        async with LanguageModelService(adapter) as service:
+            graph = ConversationGraph(
+                ConversationNodes(service), InMemorySaver()
+            ).compiled
+            config = {"configurable": {"thread_id": "default"}}
+            opened = await graph.ainvoke(
+                {"messages": [], "input_kind": "activation"},
+                config=config,
+                context=context(),
+            )
+            assert [message.text for message in opened["messages"]] == ["Welcome"]
 
-        opened = await graph.ainvoke(
-            {"messages": [], "input_kind": "activation"},
-            config=config,
-            context=context(),
-        )
-        assert [message.text for message in opened["messages"]] == ["Welcome"]
+            visible: list[ConversationTextChunk] = []
+            async for event in graph.astream(
+                {
+                    "messages": [HumanMessage("Question")],
+                    "input_kind": "user_turn",
+                },
+                config=config,
+                context=context(),
+                stream_mode="custom",
+            ):
+                visible.append(event)
+            assert "".join(event.content for event in visible) == "Answer"
 
-        answered = await graph.ainvoke(
-            {
-                "messages": [HumanMessage("Question")],
-                "input_kind": "user_turn",
-            },
-            config=config,
-            context=context(),
-        )
-        assert [message.text for message in answered["messages"]] == [
-            "Welcome",
-            "Question",
-            "Answer",
-        ]
-        assert answered["summary"] == "Remembered"
+            state = await graph.aget_state(config)
+            assert state.values["summary"] == "Remembered"
+            reopened = await graph.ainvoke(
+                {"messages": [], "input_kind": "activation"},
+                config=config,
+                context=context(),
+            )
+            assert reopened["messages"][-1].text == "Welcome back"
 
-        reopened = await graph.ainvoke(
-            {"messages": [], "input_kind": "activation"},
-            config=config,
-            context=context(),
+        assert adapter.requests[0].role is LanguageModelRole.FAST
+        assert adapter.requests[1].role is LanguageModelRole.FAST
+        assert adapter.requests[2].role is LanguageModelRole.FAST
+        assert adapter.requests[0].messages[0].role is ConversationRole.SYSTEM
+        assert adapter.requests[3].messages[0].role is ConversationRole.SYSTEM
+        assert adapter.requests[0].messages[0] != adapter.requests[3].messages[0]
+        assert all(
+            message.role is not ConversationRole.SYSTEM
+            for message in adapter.requests[0].messages[1:]
         )
-        assert reopened["messages"][-1].text == "Welcome back"
-
-        other = await graph.ainvoke(
-            {"messages": [], "input_kind": "activation"},
-            config={"configurable": {"thread_id": "other"}},
-            context=context(),
-        )
-        assert len(other["messages"]) == 1
 
     asyncio.run(scenario())
 
 
-def test_graph_message_stream_identifies_reply_and_summary_nodes() -> None:
+def test_graph_emits_prepared_acknowledgement_for_slow_detailed_reply() -> None:
+    class Prepared:
+        def next_wake_reaction(self) -> None:
+            return None
+
+        def next_reaction(self) -> str:
+            return "Reaction."
+
     async def scenario() -> None:
-        nodes = ConversationNodes()
-        nodes._models["test:model"] = FakeListChatModel(
-            responses=["Answer\n", "Remembered"]
+        long_question = " ".join(f"word{index}" for index in range(24))
+        adapter = FakeLanguageModel("Detailed", "Summary")
+        async with LanguageModelService(adapter) as service:
+            graph = ConversationGraph(
+                ConversationNodes(service, profile_preparation=Prepared())
+            ).compiled
+            events = [
+                event
+                async for event in graph.astream(
+                    {
+                        "messages": [HumanMessage(long_question)],
+                        "input_kind": "user_turn",
+                    },
+                    context=context(delay=0),
+                    stream_mode="custom",
+                )
+            ]
+        assert events[0] == ConversationTextChunk("Reaction.\n", True)
+        assert "".join(event.content for event in events[1:]) == "Detailed"
+        assert adapter.requests[0].role is LanguageModelRole.DETAILED
+
+    asyncio.run(scenario())
+
+
+def test_graph_uses_optional_classifier_for_ambiguous_turn() -> None:
+    async def scenario() -> None:
+        question = " ".join(f"word{index}" for index in range(18))
+        adapter = FakeLanguageModel("DETAILED", "Answer", "Summary")
+        settings = ConversationSettings(
+            classify_ambiguous=True,
+            acknowledgement_delay=10,
         )
-        graph = ConversationGraph(nodes, InMemorySaver()).compiled
-        streamed_nodes: set[str] = set()
-        visible = ""
+        async with LanguageModelService(adapter) as service:
+            graph = ConversationGraph(ConversationNodes(service)).compiled
+            events = [
+                event
+                async for event in graph.astream(
+                    {
+                        "messages": [HumanMessage(question)],
+                        "input_kind": "user_turn",
+                    },
+                    context=ConversationContext.from_profile(profile(), settings),
+                    stream_mode="custom",
+                )
+            ]
+        assert "".join(event.content for event in events) == "Answer"
+        assert [request.role for request in adapter.requests] == [
+            LanguageModelRole.CLASSIFIER,
+            LanguageModelRole.DETAILED,
+            LanguageModelRole.FAST,
+        ]
 
-        async for message, metadata in graph.astream(
-            {
-                "messages": [HumanMessage("Question")],
-                "input_kind": "user_turn",
-            },
-            config={"configurable": {"thread_id": "default"}},
-            context=context(),
-            stream_mode="messages",
-        ):
-            node = metadata["langgraph_node"]
-            streamed_nodes.add(node)
-            if node in ConversationNodes.RESPONSE_NODES:
-                visible += message.text
+    asyncio.run(scenario())
 
-        assert visible == "Answer\n"
-        assert streamed_nodes == {ConversationNodes.REPLY, ConversationNodes.SUMMARIZE}
+
+def test_graph_uses_prepared_wake_reaction_without_model_generation() -> None:
+    class Prepared:
+        def next_wake_reaction(self) -> str:
+            return "Listening."
+
+        def next_reaction(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        adapter = FakeLanguageModel()
+        async with LanguageModelService(adapter) as service:
+            graph = ConversationGraph(
+                ConversationNodes(service, profile_preparation=Prepared())
+            ).compiled
+            events = [
+                event
+                async for event in graph.astream(
+                    {"messages": [], "input_kind": "activation"},
+                    context=context(),
+                    stream_mode="custom",
+                )
+            ]
+        assert events == [ConversationTextChunk("Listening.\n", True)]
+        assert adapter.requests == []
 
     asyncio.run(scenario())
 
@@ -224,23 +376,14 @@ class FakeCompiled:
         self.calls: list[dict[str, Any]] = []
         self.error = error
 
-    async def astream(self, **kwargs: Any) -> AsyncIterator[tuple[Any, dict]]:
+    async def astream(self, **kwargs: Any) -> AsyncIterator[ConversationTextChunk]:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        node = (
-            ConversationNodes.OPENING
-            if kwargs["input"]["input_kind"] == "activation"
-            else ConversationNodes.REPLY
-        )
-        yield HumanMessage("ignored"), {"langgraph_node": node}
-        yield AIMessageChunk(content="Hello\n"), {"langgraph_node": node}
-        yield AIMessageChunk(content="world"), {"langgraph_node": node}
-        yield (
-            AIMessageChunk(content="hidden"),
-            {"langgraph_node": ConversationNodes.SUMMARIZE},
-        )
-        yield AIMessageChunk(content=""), {"langgraph_node": node}
+        yield SimpleNamespace(content="ignored")
+        yield ConversationTextChunk("")
+        yield ConversationTextChunk("Hello\n")
+        yield ConversationTextChunk("world")
 
 
 class FakeGraph:
@@ -248,7 +391,7 @@ class FakeGraph:
         self.compiled = compiled
 
 
-def test_worker_streams_activation_turn_chunks_and_lines() -> None:
+def test_worker_streams_chunks_phrases_and_inputs() -> None:
     async def scenario() -> None:
         bus = EventBus()
         compiled = FakeCompiled()
@@ -261,46 +404,89 @@ def test_worker_streams_activation_turn_chunks_and_lines() -> None:
         ) as replies:
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
-
             bus.publish(GenerateReply(ConversationActivated()))
-            first = [await asyncio.wait_for(replies.__anext__(), 1) for _ in range(5)]
-            for _ in first:
+            received = []
+            while not any(
+                isinstance(event, ReplyGenerationCompleted) for event in received
+            ):
+                event = await asyncio.wait_for(replies.__anext__(), 1)
+                received.append(event)
                 replies.task_done()
-            assert first == [
+            assert received == [
                 ReplyGenerationStarted(),
                 ReplyChunk("Hello\n"),
                 ReplyPhrase("Hello"),
                 ReplyChunk("world"),
                 ReplyPhrase("world"),
+                ReplyGenerationCompleted(),
             ]
-            completed = await asyncio.wait_for(replies.__anext__(), 1)
-            replies.task_done()
-            assert completed == ReplyGenerationCompleted()
-
             bus.publish(GenerateReply(UserTurn("Question")))
             while not isinstance(
-                await asyncio.wait_for(replies.__anext__(), 1),
+                event := await asyncio.wait_for(replies.__anext__(), 1),
                 ReplyGenerationCompleted,
             ):
                 replies.task_done()
             replies.task_done()
-
             bus.publish(ShutdownEvent())
             await asyncio.wait_for(task, 1)
 
-        assert compiled.calls[0]["input"] == {
-            "delivery_context": "",
-            "input_kind": "activation",
-            "messages": [],
-        }
-        assert compiled.calls[1]["input"]["input_kind"] == "user_turn"
+        assert compiled.calls[0]["input"]["input_kind"] == "activation"
         assert compiled.calls[1]["input"]["messages"] == [HumanMessage("Question")]
-        assert compiled.calls[0]["config"]["configurable"]["thread_id"] == "default"
+        assert compiled.calls[0]["stream_mode"] == "custom"
 
     asyncio.run(scenario())
 
 
-def test_worker_completes_failed_graph_request() -> None:
+def test_worker_cancels_active_and_queued_replies() -> None:
+    class BlockingCompiled(FakeCompiled):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def astream(self, **kwargs: Any) -> AsyncIterator[ConversationTextChunk]:
+            self.calls.append(kwargs)
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled.set()
+            if False:
+                yield ConversationTextChunk("")
+
+    async def scenario() -> None:
+        bus = EventBus()
+        compiled = BlockingCompiled()
+        worker = Worker(bus, FakeGraph(compiled), context())
+        with bus.subscribe(ReplyGenerationStarted, ReplyGenerationCompleted) as replies:
+            task = asyncio.create_task(worker.run())
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
+            bus.publish(GenerateReply(UserTurn("Question")))
+            assert isinstance(await replies.__anext__(), ReplyGenerationStarted)
+            replies.task_done()
+            await compiled.started.wait()
+            bus.publish(CancelReply("Delivered phrase."))
+            await asyncio.wait_for(compiled.cancelled.wait(), 1)
+            assert isinstance(await replies.__anext__(), ReplyGenerationCompleted)
+            replies.task_done()
+            assert "Delivered phrase." in worker._delivery_context
+            bus.publish(ShutdownEvent())
+            await asyncio.wait_for(task, 1)
+
+        queued = Worker(EventBus(), FakeGraph(FakeCompiled()), context())
+        queued._graph_queue.put_nowait(UserTurn("Obsolete"))
+        await queued._cancel_reply("")
+        await queued._graph_queue.join()
+        await queued._stream(UserTurn("Next"))
+        assert (
+            "before any part was delivered"
+            in (queued._graph.compiled.calls[0]["input"]["delivery_context"])
+        )
+
+    asyncio.run(scenario())
+
+
+def test_worker_propagates_graph_failure_after_completion() -> None:
     async def scenario() -> None:
         bus = EventBus()
         worker = Worker(
@@ -310,18 +496,12 @@ def test_worker_completes_failed_graph_request() -> None:
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
             bus.publish(GenerateReply(UserTurn("Question")))
-            assert (
-                await asyncio.wait_for(replies.__anext__(), 1)
-                == ReplyGenerationStarted()
-            )
+            assert isinstance(await replies.__anext__(), ReplyGenerationStarted)
             replies.task_done()
-            assert (
-                await asyncio.wait_for(replies.__anext__(), 1)
-                == ReplyGenerationCompleted()
-            )
+            assert isinstance(await replies.__anext__(), ReplyGenerationCompleted)
             replies.task_done()
             with pytest.raises(ExceptionGroup) as raised:
-                await asyncio.wait_for(task, 1)
+                await task
             assert any(
                 isinstance(error, RuntimeError) and str(error) == "graph"
                 for error in raised.value.exceptions
@@ -330,95 +510,285 @@ def test_worker_completes_failed_graph_request() -> None:
     asyncio.run(scenario())
 
 
-def test_worker_cancels_active_reply() -> None:
-    class BlockingCompiled(FakeCompiled):
-        def __init__(self) -> None:
-            super().__init__()
-            self.started = asyncio.Event()
-            self.cancelled = asyncio.Event()
+def test_worker_treats_profile_preparation_as_optional() -> None:
+    class Preparation:
+        def __init__(self, error: Exception | None = None) -> None:
+            self.error = error
+            self.called = False
 
-        async def astream(self, **kwargs: Any) -> AsyncIterator[tuple[Any, dict]]:
-            self.calls.append(kwargs)
-            self.started.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                self.cancelled.set()
-            if False:
-                yield AIMessageChunk(""), {}
+        async def prepare(self) -> None:
+            self.called = True
+            if self.error is not None:
+                raise self.error
 
-    async def scenario() -> None:
-        bus = EventBus()
-        compiled = BlockingCompiled()
-        worker = Worker(bus, FakeGraph(compiled), context())
-
-        with bus.subscribe(ReplyGenerationStarted, ReplyGenerationCompleted) as replies:
-            task = asyncio.create_task(worker.run())
-            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
-            bus.publish(GenerateReply(UserTurn("Question")))
-            assert (
-                await asyncio.wait_for(replies.__anext__(), 1)
-                == ReplyGenerationStarted()
-            )
-            replies.task_done()
-            await asyncio.wait_for(compiled.started.wait(), 1)
-
-            bus.publish(CancelReply("Delivered phrase."))
-            await asyncio.wait_for(compiled.cancelled.wait(), 1)
-            assert (
-                await asyncio.wait_for(replies.__anext__(), 1)
-                == ReplyGenerationCompleted()
-            )
-            replies.task_done()
-            assert worker._delivery_context.startswith(
-                "The previous answer was interrupted"
-            )
-            assert "Delivered phrase." in worker._delivery_context
-
-            bus.publish(ShutdownEvent())
-            await asyncio.wait_for(task, 1)
-
-    asyncio.run(scenario())
-
-
-def test_worker_cancels_queued_reply() -> None:
     async def scenario() -> None:
         worker = Worker(EventBus(), FakeGraph(FakeCompiled()), context())
-        worker._graph_queue.put_nowait(UserTurn("Obsolete"))
+        await worker._prepare_profile()
 
-        await worker._cancel_reply("")
+        successful = Preparation()
+        worker._profile_preparation = successful
+        await worker._prepare_profile()
+        assert successful.called
 
-        assert worker._graph_queue.empty()
-        await asyncio.wait_for(worker._graph_queue.join(), 1)
-        assert "before any part was delivered" in worker._delivery_context
-        await worker._stream(UserTurn("Next"))
-        assert (
-            "before any part was delivered"
-            in worker._graph.compiled.calls[0]["input"]["delivery_context"]
-        )
-        assert worker._delivery_context == ""
+        failing = Preparation(RuntimeError("optional preparation failed"))
+        worker._profile_preparation = failing
+        await worker._prepare_profile()
+        assert failing.called
 
     asyncio.run(scenario())
 
 
-async def _wait_until(predicate) -> None:
-    while not predicate():
-        await asyncio.sleep(0)
+def test_langchain_adapter_maps_messages_and_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeChat:
+        def stream(self, messages):
+            assert [message.type for message in messages] == ["system", "human"]
+            yield SimpleNamespace(text="answer")
+
+    def init_chat_model(model: str, **kwargs: Any) -> FakeChat:
+        calls.append((model, kwargs))
+        return FakeChat()
+
+    monkeypatch.setattr("langchain.chat_models.init_chat_model", init_chat_model)
+    adapter = LangChainLanguageModel(profile().models)
+    with adapter:
+        adapter.prepare(LanguageModelRole.FAST)
+        chunks = list(
+            adapter.generate(
+                LanguageModelRequest(
+                    LanguageModelRole.FAST,
+                    (
+                        ConversationMessage(ConversationRole.SYSTEM, "system"),
+                        ConversationMessage(ConversationRole.USER, "question"),
+                    ),
+                )
+            )
+        )
+    assert chunks == [LanguageModelChunk("answer")]
+    assert calls[0][0] == "test:fast"
+    assert calls[0][1]["num_predict"] == 96
+    assert calls[0][1]["reasoning"] is False
+
+    ollama_profile = profile().models.model_copy(
+        update={
+            "fast": LanguageModelProfile(langchain="ollama:gpt-oss:20b", max_tokens=96)
+        }
+    )
+    with LangChainLanguageModel(ollama_profile) as ollama_adapter:
+        ollama_adapter.prepare(LanguageModelRole.FAST)
+    assert calls[1][1]["reasoning"] == "low"
 
 
-def test_public_runner_builds_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mlx_adapter_loads_lazily_and_streams(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {
+        "templates": [],
+        "cache_count": 0,
+        "models": [],
+        "generations": [],
+    }
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            calls["templates"].append((messages, kwargs))
+            return "system-prompt" if len(messages) > 1 else "system"
+
+        def encode(self, text):
+            return [ord(character) for character in text]
+
+    mlx_lm = ModuleType("mlx_lm")
+    loaded_model = "loaded-model"
+
+    def load(model):
+        calls["models"].append(model)
+        return loaded_model, Tokenizer()
+
+    mlx_lm.load = load
+
+    def stream_generate(*args, **kwargs):
+        calls["generations"].append(kwargs)
+        yield SimpleNamespace(text="chunk")
+
+    mlx_lm.stream_generate = stream_generate
+    mlx = ModuleType("mlx")
+    mlx_core = ModuleType("mlx.core")
+    mlx_core.array = lambda value: value
+    mlx.core = mlx_core
+    generate = ModuleType("mlx_lm.generate")
+    generate.generate_step = lambda *args, **kwargs: iter(())
+    models = ModuleType("mlx_lm.models")
+    cache = ModuleType("mlx_lm.models.cache")
+
+    def make_prompt_cache(model):
+        calls["cache_count"] += 1
+        return {"model": model}
+
+    cache.make_prompt_cache = make_prompt_cache
+    sample_utils = ModuleType("mlx_lm.sample_utils")
+    sample_utils.make_sampler = lambda **kwargs: calls.setdefault("sampler", kwargs)
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", mlx_core)
+    monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm)
+    monkeypatch.setitem(sys.modules, "mlx_lm.generate", generate)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models", models)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache)
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
+
+    models = profile().models.model_copy(
+        update={
+            "fast": LanguageModelProfile(mlx="test/detailed", max_tokens=96),
+        }
+    )
+    adapter = MLXLanguageModel(models)
+    with adapter:
+        chunks = list(
+            adapter.generate(
+                LanguageModelRequest(
+                    LanguageModelRole.DETAILED,
+                    (
+                        ConversationMessage(ConversationRole.SYSTEM, "system"),
+                        ConversationMessage(ConversationRole.USER, "question"),
+                    ),
+                )
+            )
+        )
+        _ = list(
+            adapter.generate(
+                LanguageModelRequest(
+                    LanguageModelRole.DETAILED,
+                    (
+                        ConversationMessage(ConversationRole.SYSTEM, "system"),
+                        ConversationMessage(ConversationRole.USER, "question"),
+                    ),
+                )
+            )
+        )
+        _ = list(
+            adapter.generate(
+                LanguageModelRequest(
+                    LanguageModelRole.FAST,
+                    (ConversationMessage(ConversationRole.USER, "question"),),
+                )
+            )
+        )
+    assert chunks == [LanguageModelChunk("chunk")]
+    assert calls["models"] == ["test/detailed"]
+    assert calls["generations"][0]["max_tokens"] == 256
+    assert calls["templates"][0][0] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "question"},
+    ]
+    assert calls["templates"][0][1]["enable_thinking"] is False
+    assert calls["cache_count"] == 1
+    assert calls["generations"][0]["prompt"] == [
+        ord(character) for character in "-prompt"
+    ]
+    assert calls["generations"][0]["prompt_cache"] == {"model": loaded_model}
+
+
+def test_mlx_adapter_generates_without_unsupported_system_prefix_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated: dict[str, Any] = {}
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            if len(messages) == 1:
+                raise RuntimeError("A user message is required")
+            return "complete-prompt"
+
+        def encode(self, text):
+            return [1]
+
+    mlx_lm = ModuleType("mlx_lm")
+    mlx_lm.load = lambda model: (object(), Tokenizer())
+
+    def stream_generate(*args, **kwargs):
+        generated.update(kwargs)
+        yield SimpleNamespace(text="answer")
+
+    mlx_lm.stream_generate = stream_generate
+    mlx = ModuleType("mlx")
+    mlx_core = ModuleType("mlx.core")
+    mlx_core.array = lambda value: value
+    mlx.core = mlx_core
+    generate = ModuleType("mlx_lm.generate")
+    generate.generate_step = lambda *args, **kwargs: iter(())
+    models = ModuleType("mlx_lm.models")
+    cache = ModuleType("mlx_lm.models.cache")
+    cache.make_prompt_cache = lambda model: object()
+    sample_utils = ModuleType("mlx_lm.sample_utils")
+    sample_utils.make_sampler = lambda **kwargs: object()
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", mlx_core)
+    monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm)
+    monkeypatch.setitem(sys.modules, "mlx_lm.generate", generate)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models", models)
+    monkeypatch.setitem(sys.modules, "mlx_lm.models.cache", cache)
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
+
+    adapter = MLXLanguageModel(profile().models)
+    with adapter:
+        chunks = list(
+            adapter.generate(
+                LanguageModelRequest(
+                    LanguageModelRole.FAST,
+                    (
+                        ConversationMessage(ConversationRole.SYSTEM, "system"),
+                        ConversationMessage(ConversationRole.USER, "question"),
+                    ),
+                )
+            )
+        )
+
+    assert chunks == [LanguageModelChunk("answer")]
+    assert generated["prompt"] == "complete-prompt"
+    assert generated["prompt_cache"] is None
+
+
+def test_adapter_factory_and_public_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert isinstance(
+        get_language_model(profile(), ConversationSettings(adapter="langchain")),
+        LangChainLanguageModel,
+    )
+    assert isinstance(
+        get_language_model(profile(), ConversationSettings(adapter="mlx")),
+        MLXLanguageModel,
+    )
+    with pytest.raises(ValueError, match="Unsupported"):
+        get_language_model(profile(), SimpleNamespace(adapter="unknown"))
+    incomplete = profile().model_copy(
+        update={
+            "models": profile().models.model_copy(
+                update={"fast": LanguageModelProfile(langchain="only")}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No model"):
+        get_language_model(incomplete, ConversationSettings(adapter="mlx"))
+    no_classifier = profile().model_copy(
+        update={"models": profile().models.model_copy(update={"classifier": None})}
+    )
+    with pytest.raises(ValueError, match="requires a classifier"):
+        get_language_model(
+            no_classifier,
+            ConversationSettings(classify_ambiguous=True),
+        )
+
     async def scenario() -> None:
-        calls: list[object] = []
+        calls: list[Worker] = []
+        fake_model = FakeLanguageModel("One.\nTwo.")
 
         async def fake_run(self: Worker) -> None:
-            calls.extend((self._event_bus, self._context, self._graph))
+            calls.append(self)
 
         monkeypatch.setattr(Worker, "run", fake_run)
-        bus = EventBus()
-        await run_conversation_worker(bus, context())
-        assert calls[0] is bus
-        assert calls[1] == context()
-        assert isinstance(calls[2], ConversationGraph)
+        monkeypatch.setattr(model_module, "get_language_model", lambda *_: fake_model)
+        await run_conversation_worker(EventBus(), profile(), ConversationSettings())
+        assert len(calls) == 1
+        assert isinstance(calls[0]._graph, ConversationGraph)
 
     asyncio.run(scenario())
 
@@ -426,9 +796,18 @@ def test_public_runner_builds_worker(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_studio_exports_compiled_graph() -> None:
     from henry_conversation.studio import conversation_graph
 
-    assert set(conversation_graph.nodes) == {
-        "__start__",
-        "opening",
-        "reply",
-        "summarize",
-    }
+    async def scenario() -> None:
+        async with conversation_graph() as graph:
+            assert set(graph.nodes) == {
+                "__start__",
+                "opening",
+                "reply",
+                "summarize",
+            }
+
+    asyncio.run(scenario())
+
+
+async def _wait_until(predicate) -> None:
+    while not predicate():
+        await asyncio.sleep(0)

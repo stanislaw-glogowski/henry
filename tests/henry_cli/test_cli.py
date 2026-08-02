@@ -21,7 +21,13 @@ from henry_conversation import (
     ReplyPhrase,
     UserTurn,
 )
-from henry_conversation.config import ConversationProfile, ConversationPrompts
+from henry_conversation.config import (
+    ConversationProfile,
+    ConversationPrompts,
+    ConversationSettings,
+    LanguageModelProfile,
+    LanguageModelsProfile,
+)
 from henry_speech.config import SpeechSettings
 from henry_speech.events import WakeWordObserved
 
@@ -30,7 +36,10 @@ def profile():
     return SimpleNamespace(
         name="Henry",
         conversation=ConversationProfile(
-            model="test:model",
+            models=LanguageModelsProfile(
+                fast=LanguageModelProfile(langchain="test:model"),
+                detailed=LanguageModelProfile(langchain="test:model"),
+            ),
             prompts=ConversationPrompts(system="s", opening="o", summary="m"),
         ),
     )
@@ -118,11 +127,13 @@ def test_run_uses_default_profile_and_starts_workers(
         fake_profile = profile()
         store = SimpleNamespace(
             load_profile=lambda name: selected.append(name) or fake_profile,
-            load_settings=lambda: SimpleNamespace(speech=SpeechSettings()),
+            load_settings=lambda: SimpleNamespace(
+                conversation=ConversationSettings(), speech=SpeechSettings()
+            ),
         )
 
-        async def conversation(bus, context) -> None:
-            calls.append(("conversation", bus, context))
+        async def conversation(bus, conversation_profile, settings) -> None:
+            calls.append(("conversation", bus, conversation_profile, settings))
 
         async def speech(profile_value, settings, store_value, bus) -> None:
             calls.append(("speech", profile_value, settings, store_value, bus))
@@ -142,7 +153,8 @@ def test_run_uses_default_profile_and_starts_workers(
         assert selected == ["default"]
         assert {call[0] for call in calls} == {"conversation", "speech", "events"}
         conversation_call = next(call for call in calls if call[0] == "conversation")
-        assert conversation_call[2].model == "test:model"
+        assert conversation_call[2] is fake_profile.conversation
+        assert conversation_call[3] == ConversationSettings()
         speech_call = next(call for call in calls if call[0] == "speech")
         assert speech_call[1] is fake_profile
         assert speech_call[3] is store
