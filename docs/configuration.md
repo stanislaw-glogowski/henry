@@ -107,6 +107,7 @@ conversation:
   recent_messages: 8
 
 wakeword:
+  label: Hey Henry
   model_path: hey_henry.onnx
 
 tts:

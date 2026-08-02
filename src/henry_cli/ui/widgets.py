@@ -6,17 +6,18 @@ from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Button, RichLog, Static
+from textual.widgets import RichLog, Static
 
+from ..events import TelemetrySnapshot
 from ..progress import ProgressItem, ProgressSnapshot, ProgressStatus
 from .state import (
     AssistantMessage,
     ConversationState,
     PhraseState,
+    RuntimeInfo,
     RuntimeMode,
-    State,
     UserMessage,
 )
 
@@ -68,28 +69,26 @@ def _short(value: str, limit: int = 34) -> str:
 
 
 class HeaderBar(Static):
-    state = reactive(State())
+    mode = reactive(RuntimeMode.STARTING)
+    profile_name = reactive("No profile")
 
     def render(self) -> Text:
         title = Text(" H ", style="bold #08111f on #42d3c7")
         title.append("  HENRY", style="bold #eef4ff")
         title.append("  /  local voice intelligence", style="#64748b")
         title.append("\n")
-        title.append(" \u25cf ", style=_MODE_STYLES[self.state.mode])
-        title.append(self.state.mode.value, style=_MODE_STYLES[self.state.mode])
+        title.append(" \u25cf ", style=_MODE_STYLES[self.mode])
+        title.append(self.mode.value, style=_MODE_STYLES[self.mode])
         title.append("  \u00b7  ", style="#465064")
-        title.append(self.state.info.profile_name, style="#b6c2d6")
+        title.append(self.profile_name, style="#b6c2d6")
         return title
 
 
-class InfoPanel(Static):
-    state = reactive(State())
+class SignalsPanel(Static):
+    telemetry = reactive(TelemetrySnapshot())
 
     def render(self) -> Group:
-        state = self.state
-        info = state.info
-        telemetry = state.telemetry
-
+        telemetry = self.telemetry
         status = Table.grid(expand=True)
         status.add_column(width=12, style="#718096")
         status.add_column(ratio=1)
@@ -102,11 +101,17 @@ class InfoPanel(Static):
             "CAPTURED",
             Text(f"{telemetry.captured_sample_count:,} samples", style="#b6c2d6"),
         )
+        return Group(Text("SIGNALS", style="bold #42d3c7"), status)
 
+
+class RuntimePanel(Static):
+    info = reactive(RuntimeInfo())
+
+    def render(self) -> Group:
+        info = self.info
         runtime = Table.grid(expand=True, padding=(0, 1))
         runtime.add_column(width=10, style="#64748b")
         runtime.add_column(ratio=1, overflow="fold")
-        runtime.add_row("PROFILE", Text(info.profile_name, style="bold #eef4ff"))
         runtime.add_row("AUDIO", Text(info.audio_driver, style="#42d3c7"))
         runtime.add_row("INPUT", Text(_short(info.input_device), style="#b6c2d6"))
         runtime.add_row("OUTPUT", Text(_short(info.output_device), style="#b6c2d6"))
@@ -133,62 +138,65 @@ class InfoPanel(Static):
             "TTS",
             Text(f"{info.tts_adapter}\n{_short(info.tts_model)}", style="#b6c2d6"),
         )
+        return Group(Text("RUNTIME", style="bold #b69cff"), runtime)
 
+
+class LatencyPanel(Static):
+    timings = reactive(TelemetrySnapshot().timings)
+
+    def render(self) -> Group:
         timing = Table.grid(expand=True, padding=(0, 1))
         timing.add_column(ratio=1, style="#718096")
         timing.add_column(width=10, justify="right", style="#b69cff")
-        if telemetry.timings:
-            for stage, elapsed_ms in telemetry.timings:
+        if self.timings:
+            for stage, elapsed_ms in self.timings:
                 timing.add_row(stage.replace("_", " ").upper(), f"{elapsed_ms:,.0f} ms")
         else:
             timing.add_row("NO INTERACTION YET", "\u2014")
-
-        return Group(
-            Text("SIGNALS", style="bold #42d3c7"),
-            status,
-            Text("\nRUNTIME", style="bold #b69cff"),
-            runtime,
-            Text("\nLATENCY", style="bold #ffd166"),
-            timing,
-        )
+        return Group(Text("LATENCY", style="bold #ffd166"), timing)
 
 
-class ConversationTranscript(Static):
-    conversation = reactive(ConversationState())
-    spinner_frame = reactive(0)
+class InfoPanel(Static):
+    info = reactive(RuntimeInfo(), repaint=False)
+    telemetry = reactive(TelemetrySnapshot(), repaint=False)
 
-    def render(self) -> Group:
-        if not self.conversation.messages:
-            return Group(
-                Panel(
-                    Text.from_markup(
-                        "[bold #eef4ff]Ready when you are.[/]\n"
-                        "[#718096]Say the wake word to begin a conversation.[/]"
-                    ),
-                    border_style="#2d374b",
-                    padding=(1, 2),
-                )
-            )
+    def compose(self) -> ComposeResult:
+        yield SignalsPanel(id="info-signals")
+        yield RuntimePanel(id="info-runtime")
+        yield LatencyPanel(id="info-latency")
 
-        return Group(
-            *(self._render_message(message) for message in self.conversation.messages)
-        )
+    def on_mount(self) -> None:
+        self.watch_info(self.info)
+        self.watch_telemetry(self.telemetry)
 
-    def advance_spinner(self) -> None:
-        if any(
-            isinstance(message, AssistantMessage)
-            and bool(message.draft)
-            and not message.interrupted
-            for message in self.conversation.messages
-        ):
-            self.spinner_frame = (self.spinner_frame + 1) % len(_SPINNER_FRAMES)
+    def watch_info(self, info: RuntimeInfo) -> None:
+        if self.is_mounted:
+            self.query_one(RuntimePanel).info = info
 
-    def watch_conversation(self) -> None:
-        self.refresh(layout=True)
+    def watch_telemetry(self, telemetry: TelemetrySnapshot) -> None:
+        if not self.is_mounted:
+            return
+        self.query_one(SignalsPanel).telemetry = telemetry
+        self.query_one(LatencyPanel).timings = telemetry.timings
 
-    def _render_message(
-        self, message: UserMessage | AssistantMessage
-    ) -> RenderableType:
+
+type ConversationMessage = UserMessage | AssistantMessage
+
+
+class ConversationMessageView(Static):
+    def __init__(
+        self,
+        message: ConversationMessage,
+        spinner_frame: int = 0,
+        assistant_name: str = "Assistant",
+    ) -> None:
+        super().__init__(classes="conversation-message")
+        self.message = message
+        self._spinner_frame = spinner_frame
+        self._assistant_name = assistant_name
+
+    def render(self) -> Panel:
+        message = self.message
         if isinstance(message, UserMessage):
             body = Text(message.text or "Listening\u2026", style="#eef4ff")
             if not message.committed:
@@ -222,7 +230,7 @@ class ConversationTranscript(Static):
             else:
                 body.append(message.draft, style="italic #c084fc")
                 body.append(
-                    f"  {_SPINNER_FRAMES[self.spinner_frame]}",
+                    f"  {_SPINNER_FRAMES[self._spinner_frame]}",
                     style="bold #c084fc",
                 )
         if message.interrupted:
@@ -233,45 +241,184 @@ class ConversationTranscript(Static):
             )
         return Panel(
             body if body else Text("Thinking\u2026", style="italic #b69cff"),
-            title="[bold #42d3c7]HENRY[/]",
+            title=Text(self._assistant_name, style="bold #42d3c7"),
             title_align="left",
             border_style="#285650" if not message.interrupted else "#6b2b3a",
             padding=(0, 2),
         )
 
+    def update_message(
+        self,
+        message: ConversationMessage,
+        spinner_frame: int,
+        assistant_name: str,
+        *,
+        layout: bool = True,
+    ) -> None:
+        if (
+            self.message == message
+            and self._spinner_frame == spinner_frame
+            and self._assistant_name == assistant_name
+        ):
+            return
+        self.message = message
+        self._spinner_frame = spinner_frame
+        self._assistant_name = assistant_name
+        self.refresh(layout=layout)
+
+
+class ConversationEmptyView(Static):
+    wakeword_label = reactive("wake word")
+
+    def render(self) -> Panel:
+        body = Text("Waiting for ", style="#718096")
+        body.append(f"“{self.wakeword_label}”", style="bold #42d3c7")
+        body.append("…", style="#718096")
+        return Panel(
+            body,
+            title=Text("WAKE WORD", style="bold #b69cff"),
+            title_align="left",
+            border_style="#2d374b",
+            padding=(1, 2),
+        )
+
+
+class ConversationTranscript(Vertical):
+    conversation = reactive(ConversationState(), repaint=False)
+    assistant_name = reactive("Assistant", repaint=False)
+    wakeword_label = reactive("wake word", repaint=False)
+    waiting_for_wakeword = reactive(True, repaint=False)
+    spinner_frame = 0
+
+    def __init__(self, *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self._message_views: dict[tuple[str, int], ConversationMessageView] = {}
+
+    def compose(self) -> ComposeResult:
+        yield ConversationEmptyView(id="conversation-empty")
+
+    async def on_mount(self) -> None:
+        self.watch_wakeword_label(self.wakeword_label)
+        await self.watch_conversation(self.conversation)
+
+    async def watch_conversation(self, conversation: ConversationState) -> None:
+        if not self.is_mounted:
+            return
+        self._update_empty_view()
+        desired_keys = {self._message_key(message) for message in conversation.messages}
+        for key, widget in tuple(self._message_views.items()):
+            if key not in desired_keys:
+                await widget.remove()
+                del self._message_views[key]
+
+        for message in conversation.messages:
+            key = self._message_key(message)
+            spinner_frame = self._message_spinner_frame(message)
+            if widget := self._message_views.get(key):
+                widget.update_message(message, spinner_frame, self.assistant_name)
+            else:
+                widget = ConversationMessageView(
+                    message,
+                    spinner_frame,
+                    self.assistant_name,
+                )
+                self._message_views[key] = widget
+                await self.mount(widget)
+
+    def watch_assistant_name(self, assistant_name: str) -> None:
+        for widget in self._message_views.values():
+            widget.update_message(
+                widget.message,
+                widget._spinner_frame,
+                assistant_name,
+                layout=False,
+            )
+
+    def watch_wakeword_label(self, wakeword_label: str) -> None:
+        if self.is_mounted:
+            self.query_one(ConversationEmptyView).wakeword_label = wakeword_label
+
+    def watch_waiting_for_wakeword(self) -> None:
+        if self.is_mounted:
+            self._update_empty_view()
+
+    def _update_empty_view(self) -> None:
+        self.query_one(ConversationEmptyView).display = (
+            not self.conversation.messages and self.waiting_for_wakeword
+        )
+
+    @staticmethod
+    def _message_key(message: ConversationMessage) -> tuple[str, int]:
+        if isinstance(message, UserMessage):
+            return "user", message.turn_id
+        return "assistant", message.reply_id
+
+    def _message_spinner_frame(self, message: ConversationMessage) -> int:
+        if (
+            isinstance(message, AssistantMessage)
+            and message.draft
+            and not message.interrupted
+        ):
+            return self.spinner_frame
+        return 0
+
+    def advance_spinner(self) -> None:
+        message = next(
+            (
+                item
+                for item in reversed(self.conversation.messages)
+                if isinstance(item, AssistantMessage)
+                and item.draft
+                and not item.interrupted
+            ),
+            None,
+        )
+        if message is None:
+            return
+        self.spinner_frame = (self.spinner_frame + 1) % len(_SPINNER_FRAMES)
+        key = self._message_key(message)
+        if widget := self._message_views.get(key):
+            widget.update_message(
+                message,
+                self.spinner_frame,
+                self.assistant_name,
+                layout=False,
+            )
+
 
 class ConversationView(Static):
-    conversation = reactive(ConversationState())
+    conversation = reactive(ConversationState(), repaint=False)
+    assistant_name = reactive("Assistant", repaint=False)
+    wakeword_label = reactive("wake word", repaint=False)
+    waiting_for_wakeword = reactive(True, repaint=False)
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="conversation-scroll"):
             yield ConversationTranscript(id="conversation-transcript")
-        yield Button("\u2193  Jump to latest", id="jump-latest", variant="primary")
 
     def on_mount(self) -> None:
         self.query_one("#conversation-scroll", VerticalScroll).anchor()
         self.set_interval(0.08, self._advance_spinner)
-        self.set_interval(0.2, self._update_jump_button)
 
     def watch_conversation(self, conversation: ConversationState) -> None:
         if not self.is_mounted:
             return
         self.query_one(ConversationTranscript).conversation = conversation
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "jump-latest":
-            self.query_one("#conversation-scroll", VerticalScroll).scroll_end(
-                animate=True
-            )
+    def watch_assistant_name(self, assistant_name: str) -> None:
+        if self.is_mounted:
+            self.query_one(ConversationTranscript).assistant_name = assistant_name
+
+    def watch_wakeword_label(self, wakeword_label: str) -> None:
+        if self.is_mounted:
+            self.query_one(ConversationTranscript).wakeword_label = wakeword_label
+
+    def watch_waiting_for_wakeword(self, waiting: bool) -> None:
+        if self.is_mounted:
+            self.query_one(ConversationTranscript).waiting_for_wakeword = waiting
 
     def _advance_spinner(self) -> None:
         self.query_one(ConversationTranscript).advance_spinner()
-
-    def _update_jump_button(self) -> None:
-        scroll = self.query_one("#conversation-scroll", VerticalScroll)
-        self.query_one(
-            "#jump-latest", Button
-        ).display = not scroll.is_vertical_scroll_end
 
 
 class LogsView(RichLog):

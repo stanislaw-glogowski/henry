@@ -51,6 +51,7 @@ class RuntimeInfo:
     output_device: str = "Waiting…"
     vad_adapter: str = "—"
     vad_threshold: float = 0.0
+    wakeword_label: str = "wake word"
     wakeword_model: str = "—"
     wakeword_threshold: float = 0.0
     stt_adapter: str = "—"
@@ -100,6 +101,7 @@ class RuntimeInfo:
             audio_driver=speech.audio.driver,
             vad_adapter=speech.vad.adapter,
             vad_threshold=speech.vad.threshold,
+            wakeword_label=profile.wakeword.label,
             wakeword_model=profile.wakeword.model_path,
             wakeword_threshold=profile.wakeword.threshold,
             stt_adapter=stt_adapter,

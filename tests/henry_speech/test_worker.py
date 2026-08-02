@@ -36,8 +36,11 @@ from henry_speech.events import (
     InteractionTimingObserved,
     ReplyPhraseDelivered,
     ReplyPhrasePlaybackStarted,
+    SpeechChunkCaptured,
     TranscriptionProgressObserved,
     UserTurnCommitted,
+    VADObserved,
+    WakeWordObserved,
 )
 from henry_speech.segmentation import SpeechSegment
 from henry_speech.transcription import TranscriptionChunk, TranscriptionText
@@ -142,6 +145,61 @@ class FakePlayback(FakeAsyncResource):
 
     async def restore(self) -> None:
         self.restore_count += 1
+
+
+def test_capture_telemetry_is_throttled_with_immediate_detections() -> None:
+    async def scenario() -> None:
+        bus = EventBus()
+        worker = Worker(
+            bus,
+            FakeCapture(),
+            FakeSegmentation(),
+            FakeTranscription(),
+            FakeSynthesis(),
+            FakePlayback(),
+        )
+        with bus.subscribe(
+            SpeechChunkCaptured,
+            VADObserved,
+            WakeWordObserved,
+        ) as telemetry:
+            silence = speech_chunk(speech=False)
+            worker._publish_capture_telemetry(silence)
+            worker._publish_capture_telemetry(silence)
+            assert telemetry._queue.empty()
+
+            worker._publish_capture_telemetry(silence)
+            captured = await telemetry.__anext__()
+            telemetry.task_done()
+            vad = await telemetry.__anext__()
+            telemetry.task_done()
+            wakeword = await telemetry.__anext__()
+            telemetry.task_done()
+            assert captured == SpeechChunkCaptured(3, False, False)
+            assert vad == VADObserved(0.1, False)
+            assert wakeword == WakeWordObserved(0.9, False)
+
+            worker._publish_capture_telemetry(speech_chunk())
+            captured = await telemetry.__anext__()
+            telemetry.task_done()
+            vad = await telemetry.__anext__()
+            telemetry.task_done()
+            await telemetry.__anext__()
+            telemetry.task_done()
+            assert captured == SpeechChunkCaptured(1, True, False)
+            assert vad == VADObserved(0.8, True)
+
+            worker._publish_capture_telemetry(speech_chunk(speech=False, wakeword=True))
+            captured = await telemetry.__anext__()
+            telemetry.task_done()
+            await telemetry.__anext__()
+            telemetry.task_done()
+            wakeword = await telemetry.__anext__()
+            telemetry.task_done()
+            assert captured == SpeechChunkCaptured(1, False, True)
+            assert wakeword == WakeWordObserved(0.9, True)
+
+    asyncio.run(scenario())
 
 
 def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
@@ -537,7 +595,7 @@ def test_public_speech_runner_composes_services(
 
         monkeypatch.setattr(Worker, "run", fake_run)
         profile = SpeechProfile(
-            wakeword={"model_path": "wake.onnx"},
+            wakeword={"label": "Wake", "model_path": "wake.onnx"},
             tts={"model_path": "voice.onnx"},
         )
         settings = SpeechSettings()

@@ -26,6 +26,7 @@ conversation:
       model_id: ollama:gpt-oss:20b
   recent_messages: 6
 wakeword:
+  label: Wakeword
   model_path: wakeword.onnx
 tts:
   model_path: voice.onnx
@@ -81,6 +82,7 @@ def test_local_store_loads_profile_settings_and_models(tmp_path: Path) -> None:
     assert profile.id == "default"
     assert profile.path == profile_path
     assert profile.name == "Henry"
+    assert profile.wakeword.label == "Wakeword"
     assert profile.stt == {"model_id": "profile/stt"}
     assert profile.conversation.recent_messages == 6
     assert profile.conversation.prompts.system.startswith("System")

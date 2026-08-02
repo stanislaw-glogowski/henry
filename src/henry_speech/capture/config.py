@@ -16,6 +16,7 @@ class VADSettings(ConfigModel):
 
 
 class WakeWordProfile(ConfigModel):
+    label: str = Field(min_length=1)
     model_path: str = Field(min_length=1)
     threshold: float = 0.75
 

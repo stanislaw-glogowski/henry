@@ -29,17 +29,25 @@ from henry_cli.ui.state import (
     UserMessage,
 )
 from henry_cli.ui.widgets import (
+    ConversationMessageView,
     ConversationTranscript,
     ConversationView,
     HeaderBar,
     InfoPanel,
+    LatencyPanel,
     ProgressDisplay,
+    RuntimePanel,
+    SignalsPanel,
     _meter,
     _short,
 )
 from henry_conversation import ConversationReady
 from henry_resources import ProfileEntry, Settings
-from henry_speech.events import UserTurnCommitted
+from henry_speech.events import (
+    UserTurnCommitted,
+    VoiceSessionMode,
+    VoiceSessionModeChanged,
+)
 
 from .test_state import profile
 
@@ -54,11 +62,11 @@ def rendered(renderable) -> str:
 def test_dashboard_renderables_expose_runtime_and_conversation_states() -> None:
     state = State().with_runtime(profile(), Settings())
     header = HeaderBar()
-    header.state = state
+    header.mode = state.mode
+    header.profile_name = state.info.profile_name
     assert "HENRY" in rendered(header.render())
 
-    panel = InfoPanel()
-    panel.state = replace(
+    telemetry = replace(
         state,
         telemetry=replace(
             state.telemetry,
@@ -67,17 +75,22 @@ def test_dashboard_renderables_expose_runtime_and_conversation_states() -> None:
             wakeword_score=-1,
             timings=(("reply_started", 99.9),),
         ),
-    )
-    info = rendered(panel.render())
+    ).telemetry
+    signals = SignalsPanel()
+    signals.telemetry = telemetry
+    runtime = RuntimePanel()
+    runtime.info = state.info
+    latency = LatencyPanel()
+    latency.timings = telemetry.timings
+    info = "".join(rendered(panel.render()) for panel in (signals, runtime, latency))
     assert "SIGNALS" in info
+    assert "PROFILE" not in rendered(runtime.render())
     assert "REPLY STARTED" in info
     assert "test/fast" in info
     assert "█" in rendered(_meter(0.5, False))
     assert _short("short") == "short"
     assert _short("very long value", 8).endswith("…")
 
-    transcript = ConversationTranscript()
-    assert "Ready when you are" in rendered(transcript.render())
     interrupted = AssistantMessage(
         1,
         phrases=(
@@ -88,35 +101,28 @@ def test_dashboard_renderables_expose_runtime_and_conversation_states() -> None:
         draft="Building",
         interrupted=True,
     )
-    transcript.conversation = ConversationState(
-        (UserMessage(1, "Question", committed=False), interrupted)
+    interrupted_view = ConversationMessageView(
+        interrupted,
+        assistant_name="Test Henry",
     )
-    output = rendered(transcript.render())
-    assert "Question" in output
+    output = rendered(interrupted_view.render())
     assert "Queued. Speaking. Delivered. Building" in output
     assert "REPLY INTERRUPTED" in output
     assert not any(
         frame in output
         for frame in "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
     )
-    interrupted_panel = transcript._render_message(interrupted)
+    interrupted_panel = interrupted_view.render()
     assert isinstance(interrupted_panel, Panel)
+    assert isinstance(interrupted_panel.title, Text)
+    assert interrupted_panel.title.plain == "Test Henry"
     assert isinstance(interrupted_panel.renderable, Text)
     assert {str(span.style) for span in interrupted_panel.renderable.spans[:-1]} == {
         "#a7b0c0"
     }
-    transcript.advance_spinner()
-    assert transcript.spinner_frame == 0
-
-    transcript.conversation = ConversationState(
-        (UserMessage(2, "Done", committed=True), AssistantMessage(2))
-    )
-    assert "Thinking" in rendered(transcript.render())
-    transcript.advance_spinner()
-    assert transcript.spinner_frame == 0
-    transcript.conversation = ConversationState((AssistantMessage(3, draft="Live"),))
-    transcript.advance_spinner()
-    assert transcript.spinner_frame == 1
+    assert "Thinking" in rendered(ConversationMessageView(AssistantMessage(2)).render())
+    live = ConversationMessageView(AssistantMessage(3, draft="Live"), spinner_frame=1)
+    assert "Live" in rendered(live.render())
 
 
 def test_progress_renderable_handles_waiting_active_and_completed_items() -> None:
@@ -178,6 +184,14 @@ def test_terminal_app_profile_startup_navigation_and_live_updates() -> None:
             await app.finish_startup()
             await pilot.pause()
 
+            view = app.query_one(ConversationView)
+            empty = view.query_one("#conversation-empty", Static)
+            assert "Waiting for “Wake”…" in rendered(empty.render())
+            bridge._queue.put_nowait(VoiceSessionModeChanged(VoiceSessionMode.ACTIVE))
+            await bridge._queue.join()
+            await pilot.pause()
+            assert not empty.display
+
             app.action_show_logs()
             assert app.query_one(ContentSwitcher).current == "logs"
             logs.write("hello from worker")
@@ -198,10 +212,7 @@ def test_terminal_app_profile_startup_navigation_and_live_updates() -> None:
             assert app.state.conversation_ready
             await bridge._queue.join()
 
-            view = app.query_one(ConversationView)
             view._advance_spinner()
-            view._update_jump_button()
-            view.query_one("#jump-latest", Button).press()
             await pilot.pause()
 
             app.action_request_quit()
@@ -212,6 +223,11 @@ def test_terminal_app_profile_startup_navigation_and_live_updates() -> None:
 
 def test_conversation_follows_latest_until_user_scrolls_history() -> None:
     class ConversationApp(App[None]):
+        CSS = """
+        ConversationView, #conversation-scroll { height: 100%; }
+        #conversation-transcript, .conversation-message { height: auto; }
+        """
+
         def compose(self) -> ComposeResult:
             yield ConversationView()
 
@@ -220,7 +236,18 @@ def test_conversation_follows_latest_until_user_scrolls_history() -> None:
         async with app.run_test(size=(70, 12)) as pilot:
             view = app.query_one(ConversationView)
             scroll = view.query_one("#conversation-scroll", VerticalScroll)
+            transcript = view.query_one(ConversationTranscript)
             assert scroll.is_anchored
+            assert transcript.query_one("#conversation-empty", Static).display
+            view.assistant_name = "Test Henry"
+            view.wakeword_label = "Hey Henry"
+            await pilot.pause()
+            empty = transcript.query_one("#conversation-empty", Static)
+            assert "Waiting for “Hey Henry”…" in rendered(empty.render())
+            view.waiting_for_wakeword = False
+            await pilot.pause()
+            assert not empty.display
+            view.waiting_for_wakeword = True
 
             messages = tuple(
                 UserMessage(index, f"Message {index}", committed=True)
@@ -229,12 +256,33 @@ def test_conversation_follows_latest_until_user_scrolls_history() -> None:
             view.conversation = ConversationState(messages)
             await pilot.pause()
             assert scroll.is_vertical_scroll_end
+            original_widgets = tuple(transcript.query(ConversationMessageView))
+            assert len(original_widgets) == len(messages)
 
             view.conversation = ConversationState(
                 (*messages, AssistantMessage(13, draft="A growing reply " * 20))
             )
             await pilot.pause()
             assert scroll.is_vertical_scroll_end
+            growing_widgets = tuple(transcript.query(ConversationMessageView))
+            assert growing_widgets[:-1] == original_widgets
+            active_reply = growing_widgets[-1]
+            active_panel = active_reply.render()
+            assert isinstance(active_panel.title, Text)
+            assert active_panel.title.plain == "Test Henry"
+
+            view.conversation = ConversationState(
+                (*messages, AssistantMessage(13, draft="A longer growing reply"))
+            )
+            await pilot.pause()
+            updated_widgets = tuple(transcript.query(ConversationMessageView))
+            assert updated_widgets == growing_widgets
+            assert active_reply.message == AssistantMessage(
+                13, draft="A longer growing reply"
+            )
+            spinner_frame = active_reply._spinner_frame
+            transcript.advance_spinner()
+            assert active_reply._spinner_frame == (spinner_frame + 1) % 10
 
             scroll.scroll_up(animate=False, immediate=True)
             history_position = scroll.scroll_y
@@ -247,10 +295,8 @@ def test_conversation_follows_latest_until_user_scrolls_history() -> None:
             await pilot.pause()
             assert scroll.scroll_y == history_position
             assert not scroll.is_vertical_scroll_end
-            assert view.query_one("#jump-latest", Button).display
-
-            view.query_one("#jump-latest", Button).press()
-            await pilot.pause(1.1)
+            scroll.scroll_end(animate=False)
+            await pilot.pause()
             assert scroll.is_vertical_scroll_end
 
     asyncio.run(scenario())

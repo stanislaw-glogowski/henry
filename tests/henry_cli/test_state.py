@@ -50,7 +50,11 @@ def profile(**updates) -> Profile:
                 "summary": "summary {conversation_summary} {recent_conversation}",
             },
         },
-        "wakeword": {"model_path": "wake.onnx", "threshold": 0.7},
+        "wakeword": {
+            "label": "Wake",
+            "model_path": "wake.onnx",
+            "threshold": 0.7,
+        },
         "stt": {},
         "tts": {"model_path": "voice.onnx"},
     }
@@ -68,6 +72,7 @@ def test_runtime_info_maps_all_runtime_adapter_variants() -> None:
     )
     info = RuntimeInfo.from_runtime(value, settings)
     assert info.profile_id == "test"
+    assert info.wakeword_label == "Wake"
     assert info.llm_model == "test/fast · test/detailed"
     assert info.stt_model == settings.speech.stt.model_id
     assert info.tts_model.endswith("/voice.onnx")

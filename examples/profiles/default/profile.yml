@@ -21,6 +21,7 @@ conversation:
   recent_messages: 8 # recent messages supplied alongside the conversation summary
 
 wakeword:
+  label: "Hey Henry" # phrase displayed while waiting for voice activation
   model_path: "hey_henry.onnx" # ONNX file below models/openwakeword
 
 tts:

@@ -97,6 +97,8 @@ class _PlaybackControl(Enum):
 
 
 class Worker(Component):
+    _TELEMETRY_INTERVAL_FRAMES = 3
+
     def __init__(
         self,
         event_bus: EventBus,
@@ -151,6 +153,9 @@ class Worker(Component):
         self._interaction_started_ns: int | None = None
         self._observed_timing_stages: set[InteractionStage] = set()
         self._playback_started_phrases: set[tuple[ReplyId, PhraseId]] = set()
+        self._telemetry_frame_count = 0
+        self._telemetry_sample_count = 0
+        self._published_vad_detected = False
 
         self._logger.debug("INITIALIZED")
 
@@ -196,11 +201,7 @@ class Worker(Component):
             if self._shutdown_event.is_set():
                 return
 
-            self._event_bus.publish(
-                SpeechChunkCaptured.from_chunk(chunk),
-                VADObserved.from_chunk(chunk),
-                WakeWordObserved.from_chunk(chunk),
-            )
+            self._publish_capture_telemetry(chunk)
 
             if not self._listening:
                 self._observe_pending_turn(chunk)
@@ -213,6 +214,30 @@ class Worker(Component):
                 self._start_interaction()
                 self._prepare_for_reply()
                 self._event_bus.publish(GenerateReply(ConversationActivated()))
+
+    def _publish_capture_telemetry(self, chunk: SpeechChunk) -> None:
+        self._telemetry_frame_count += 1
+        self._telemetry_sample_count += len(chunk.audio.samples)
+        detection_started = chunk.is_speech and not self._published_vad_detected
+        if (
+            self._telemetry_frame_count < self._TELEMETRY_INTERVAL_FRAMES
+            and not detection_started
+            and not chunk.is_wakeword
+        ):
+            return
+
+        self._event_bus.publish(
+            SpeechChunkCaptured(
+                samples_len=self._telemetry_sample_count,
+                is_speech=chunk.is_speech,
+                is_wakeword=chunk.is_wakeword,
+            ),
+            VADObserved.from_chunk(chunk),
+            WakeWordObserved.from_chunk(chunk),
+        )
+        self._telemetry_frame_count = 0
+        self._telemetry_sample_count = 0
+        self._published_vad_detected = chunk.is_speech
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(

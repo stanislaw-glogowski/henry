@@ -142,7 +142,7 @@ def test_segmentation_uses_longer_pause_for_short_utterance_and_hard_limit() -> 
 
 def test_speech_configuration_defaults_and_validation() -> None:
     profile = SpeechProfile(
-        wakeword=WakeWordProfile(model_path="wake.onnx"),
+        wakeword=WakeWordProfile(label="Wake", model_path="wake.onnx"),
         tts={"model_path": "voice.onnx"},
         stt={},
     )
@@ -161,7 +161,9 @@ def test_speech_configuration_defaults_and_validation() -> None:
     assert isinstance(alternate.stt, MLXWhisperSettings)
 
     with pytest.raises(ValidationError, match="ONNX"):
-        WakeWordProfile(model_path="wake.bin")
+        WakeWordProfile(label="Wake", model_path="wake.bin")
+    with pytest.raises(ValidationError, match="label"):
+        WakeWordProfile.model_validate({"model_path": "wake.onnx"})
     with pytest.raises(ValidationError, match="model_path"):
         WakeWordProfile.model_validate({"model": "wake.onnx"})
 

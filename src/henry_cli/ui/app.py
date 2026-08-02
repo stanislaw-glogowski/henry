@@ -13,6 +13,7 @@ from textual.reactive import reactive
 from textual.widgets import ContentSwitcher, Footer
 
 from henry_resources import Profile, ProfileEntry, Settings
+from henry_speech.events import VoiceSessionMode
 
 from ..events import UiEventBridge
 from ..logs import LogBuffer
@@ -34,7 +35,7 @@ class TerminalApp(App[None]):
         Binding("q", "request_quit", "Quit"),
     ]
 
-    state = reactive(State())
+    state = reactive(State(), repaint=False)
 
     def __init__(
         self,
@@ -144,12 +145,30 @@ class TerminalApp(App[None]):
             return
         self._quit_requested.set()
 
-    def watch_state(self, state: State) -> None:
+    def watch_state(self, previous: State, state: State) -> None:
         if not self.is_mounted:
             return
-        self.query_one(HeaderBar).state = state
-        self.query_one(InfoPanel).state = state
-        self.query_one(ConversationView).conversation = state.conversation
+        header = self.query_one(HeaderBar)
+        if previous.mode is not state.mode:
+            header.mode = state.mode
+        if previous.info.profile_name != state.info.profile_name:
+            header.profile_name = state.info.profile_name
+        info = self.query_one(InfoPanel)
+        conversation = self.query_one(ConversationView)
+        if previous.info != state.info:
+            info.info = state.info
+        if previous.info.profile_name != state.info.profile_name:
+            conversation.assistant_name = state.info.profile_name
+        if previous.info.wakeword_label != state.info.wakeword_label:
+            conversation.wakeword_label = state.info.wakeword_label
+        if previous.telemetry != state.telemetry:
+            info.telemetry = state.telemetry
+        if previous.session_mode is not state.session_mode:
+            conversation.waiting_for_wakeword = (
+                state.session_mode is not VoiceSessionMode.ACTIVE
+            )
+        if previous.conversation != state.conversation:
+            conversation.conversation = state.conversation
 
     def on_mount(self) -> None:
         self._mounted.set()
@@ -188,5 +207,6 @@ class TerminalApp(App[None]):
             widget.write(line)
 
     def _refresh_progress(self) -> None:
-        if self._startup_screen is not None:
-            self._startup_screen.update_progress(self._progress.snapshot)
+        screen = self._startup_screen
+        if screen is not None and self.screen is screen:
+            screen.update_progress(self._progress.snapshot)

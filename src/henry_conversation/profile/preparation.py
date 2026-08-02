@@ -1,11 +1,12 @@
 from itertools import cycle
+from random import shuffle
 
 from ..model import LanguageModelRole, LanguageModelService
 from .config import ConversationReactions
 
 
 class ProfilePreparation:
-    """Rotate immediate reactions and warm the fast model outside response runs."""
+    """Rotate shuffled reactions and warm the fast model outside response runs."""
 
     def __init__(
         self,
@@ -13,8 +14,12 @@ class ProfilePreparation:
         reactions: ConversationReactions,
     ) -> None:
         self._language_model = language_model
-        self._wake_reactions = cycle(reactions.wake)
-        self._wait_reactions = cycle(reactions.wait)
+        wake_reactions = list(reactions.wake)
+        wait_reactions = list(reactions.wait)
+        shuffle(wake_reactions)
+        shuffle(wait_reactions)
+        self._wake_reactions = cycle(wake_reactions)
+        self._wait_reactions = cycle(wait_reactions)
 
     async def prepare(self) -> None:
         await self._language_model.prepare(LanguageModelRole.FAST)

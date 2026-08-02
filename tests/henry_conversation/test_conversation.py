@@ -227,7 +227,14 @@ def test_language_model_service_propagates_generation_error() -> None:
     asyncio.run(scenario())
 
 
-def test_profile_preparation_generates_rotating_reactions() -> None:
+def test_profile_preparation_generates_shuffled_rotating_reactions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "henry_conversation.profile.preparation.shuffle",
+        lambda reactions: reactions.reverse(),
+    )
+
     async def scenario() -> None:
         model = FakeLanguageModel()
         async with LanguageModelService(model) as service:
@@ -240,14 +247,14 @@ def test_profile_preparation_generates_rotating_reactions() -> None:
             )
             await preparation.prepare()
             assert [preparation.next_reaction() for _ in range(3)] == [
-                "Wait one.",
                 "Wait two.",
                 "Wait one.",
+                "Wait two.",
             ]
             assert [preparation.next_wake_reaction() for _ in range(3)] == [
-                "Wake one.",
                 "Wake two.",
                 "Wake one.",
+                "Wake two.",
             ]
         assert any(
             operation == f"prepare:{LanguageModelRole.FAST}"

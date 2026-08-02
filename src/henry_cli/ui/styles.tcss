@@ -34,6 +34,18 @@ Screen {
     overflow-y: auto;
 }
 
+#info-signals,
+#info-runtime,
+#info-latency {
+    width: 100%;
+    height: auto;
+}
+
+#info-runtime,
+#info-latency {
+    margin-top: 1;
+}
+
 #content {
     width: 1fr;
     height: 100%;
@@ -62,17 +74,10 @@ Screen {
     height: auto;
 }
 
-#jump-latest {
-    display: none;
-    dock: bottom;
-    width: 22;
-    min-width: 22;
-    height: 3;
-    margin: 0 2 1 0;
-    align-horizontal: right;
-    background: $henry-aqua;
-    color: #08111f;
-    border: none;
+#conversation-empty,
+.conversation-message {
+    width: 100%;
+    height: auto;
 }
 
 #logs {
