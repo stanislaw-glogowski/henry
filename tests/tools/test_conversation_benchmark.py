@@ -107,4 +107,4 @@ def test_conversation_benchmark_cli_uses_configured_adapter(
         )
     )
 
-    assert output_directories[0].name.startswith("default-langchain-")
+    assert output_directories[0].name.startswith("default-mlx-")

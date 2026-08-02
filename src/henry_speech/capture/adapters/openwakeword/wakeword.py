@@ -25,7 +25,7 @@ class OpenWakeWordModel(WakeWordModel, BaseModel):
         super().__init__(catalog)
         self._profile = profile
         self._model: Model | None = None
-        self._model_path = self._ensure_model_path(profile.model)
+        self._model_path = self._ensure_model_path(profile.model_path)
         self._melspec_path = self._ensure_model_path(self._MELSPEC_PATH)
         self._embedding_path = self._ensure_model_path(self._EMBEDDING_PATH)
         self._samples_buffer = np.empty(0, dtype=np.float32)
@@ -80,6 +80,8 @@ class OpenWakeWordModel(WakeWordModel, BaseModel):
             )
 
             scores = self._model.predict(pcm16_chunk)
+            if not isinstance(scores, dict):
+                raise RuntimeError("OpenWakeWord returned timing data unexpectedly")
 
             for score in scores.values():
                 highest_score = max(highest_score, float(score))

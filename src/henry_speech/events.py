@@ -1,9 +1,20 @@
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Literal
 
-from henry_common.events import TelemetryEvent
+from henry_common.events import StateEvent, TelemetryEvent
+from henry_conversation.events import PhraseId, ReplyId
 
+from .audio import AudioDevices
 from .capture import DetectionResult, SpeechChunk
+
+type TurnId = int
+
+
+class VoiceSessionMode(Enum):
+    WAITING_FOR_WAKE_WORD = auto()
+    ACTIVE = auto()
+
 
 type InteractionStage = Literal[
     "turn_ready",
@@ -27,8 +38,43 @@ class InteractionTimingObserved(TelemetryEvent):
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionProgressObserved(TelemetryEvent):
+    turn_id: TurnId
     content: str
     likely_complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class UserTurnCommitted(StateEvent):
+    turn_id: TurnId
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyPhrasePlaybackStarted(StateEvent):
+    reply_id: ReplyId
+    phrase_id: PhraseId
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyPhraseDelivered(StateEvent):
+    reply_id: ReplyId
+    phrase_id: PhraseId
+
+
+@dataclass(frozen=True, slots=True)
+class AudioDevicesSelected(StateEvent):
+    driver: str
+    devices: AudioDevices
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechReady(StateEvent):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceSessionModeChanged(StateEvent):
+    mode: VoiceSessionMode
 
 
 @dataclass(frozen=True, slots=True)

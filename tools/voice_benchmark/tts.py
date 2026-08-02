@@ -14,7 +14,7 @@ from .core import benchmark_root, load_suite, timestamp_id, write_rows, write_wa
 
 def run_tts(args) -> Path:
     suite = load_suite(args.suite)
-    profile_key = "voice_path" if args.adapter == "piper" else "model_id"
+    profile_key = "model_path" if args.adapter == "piper" else "model_id"
     profile = TTSProfile(tts={profile_key: args.model})
     settings = TypeAdapter(TTSSettings).validate_python({"adapter": args.adapter})
     model = get_tts_model(profile, settings)

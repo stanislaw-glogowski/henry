@@ -61,4 +61,4 @@ class LanguageModelProfile(ConfigModel):
 
 
 def default_language_model_settings() -> LanguageModelSettings:
-    return LangChainSettings()
+    return MLXSettings()

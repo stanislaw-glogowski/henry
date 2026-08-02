@@ -1,13 +1,19 @@
+import asyncio
+
 from henry_common.events import EventBus
 
 from .config import ConversationSettings
 from .events import (
     CancelReply,
     ConversationActivated,
+    ConversationReady,
     GenerateReply,
+    PhraseId,
     ReplyChunk,
+    ReplyDraftUpdated,
     ReplyGenerationCompleted,
     ReplyGenerationStarted,
+    ReplyId,
     ReplyPhrase,
     UserTurn,
 )
@@ -28,6 +34,7 @@ __all__ = [
     "ConversationMessage",
     "ConversationProfile",
     "ConversationReactions",
+    "ConversationReady",
     "ConversationRole",
     "ConversationSettings",
     "ConversationTextChunk",
@@ -35,9 +42,12 @@ __all__ = [
     "LanguageModelChunk",
     "LanguageModelRequest",
     "LanguageModelRole",
+    "PhraseId",
     "ReplyChunk",
+    "ReplyDraftUpdated",
     "ReplyGenerationCompleted",
     "ReplyGenerationStarted",
+    "ReplyId",
     "ReplyPhrase",
     "ResponseMode",
     "ResponsePlan",
@@ -51,6 +61,7 @@ async def run_conversation_worker(
     event_bus: EventBus,
     profile: ConversationProfile,
     settings: ConversationSettings,
+    start_event: asyncio.Event | None = None,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
 
@@ -61,7 +72,7 @@ async def run_conversation_worker(
 
     language_model = get_language_model(
         profile,
-        settings.model,
+        settings.language_model,
         require_classifier=settings.classify_ambiguous,
     )
     context = ConversationContext.from_profile(profile, settings)
@@ -76,4 +87,5 @@ async def run_conversation_worker(
             graph=graph,
             context=context,
             profile_preparation=preparation,
+            start_event=start_event,
         ).run()

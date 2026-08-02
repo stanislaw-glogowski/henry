@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from huggingface_hub.utils import disable_progress_bars
 
 from ...audio import AudioFrame
-from ..config import VADSettings
+from ..config import MLX_SILERO_VAD_MODEL_ID, VADSettings
 from ..domain import DetectionResult
 from ..ports import VADModel
 
@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 
 class SileroVADModel(VADModel):
-    _MODEL_ID = "mlx-community/silero-vad"
-
     def __init__(
         self,
         settings: VADSettings | None = None,
@@ -48,8 +46,8 @@ class SileroVADModel(VADModel):
             from mlx_audio.vad import load
             from mlx_audio.vad.models.silero_vad import Model as LoadedModel
 
-            self._logger.debug("Loading model: model_id='{}'", self._MODEL_ID)
-            model = load(self._MODEL_ID)
+            self._logger.debug("Loading model: model_id='{}'", MLX_SILERO_VAD_MODEL_ID)
+            model = load(MLX_SILERO_VAD_MODEL_ID)
             assert isinstance(model, LoadedModel)
             self._model = model
 

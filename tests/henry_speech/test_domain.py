@@ -142,11 +142,11 @@ def test_segmentation_uses_longer_pause_for_short_utterance_and_hard_limit() -> 
 
 def test_speech_configuration_defaults_and_validation() -> None:
     profile = SpeechProfile(
-        wakeword=WakeWordProfile(model="wake.onnx"),
-        tts={"voice_path": "voice.onnx"},
+        wakeword=WakeWordProfile(model_path="wake.onnx"),
+        tts={"model_path": "voice.onnx"},
         stt={},
     )
-    assert profile.tts_piper.voice_path == "voice.onnx"
+    assert profile.tts_piper.model_path == "voice.onnx"
     assert profile.stt_mlx_parakeet_tdt.model_id is None
     assert SpeechSettings().audio.driver == "avfaudio"
     assert SpeechSettings().segmentation.min_start_speech_frames == 10
@@ -161,7 +161,9 @@ def test_speech_configuration_defaults_and_validation() -> None:
     assert isinstance(alternate.stt, MLXWhisperSettings)
 
     with pytest.raises(ValidationError, match="ONNX"):
-        WakeWordProfile(model="wake.bin")
+        WakeWordProfile(model_path="wake.bin")
+    with pytest.raises(ValidationError, match="model_path"):
+        WakeWordProfile.model_validate({"model": "wake.onnx"})
 
     with pytest.raises(ValidationError, match="extra_forbidden"):
         SpeechSettings.model_validate(

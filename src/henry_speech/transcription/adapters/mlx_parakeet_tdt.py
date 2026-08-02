@@ -7,9 +7,7 @@ from ..domain import TranscriptionChunk
 from .mlx_base import MLXBaseModel
 
 
-class ParakeetTDTModel(
-    MLXBaseModel[Any, MLXParakeetTDTProfile, MLXParakeetTDTSettings]
-):
+class ParakeetTDTModel(MLXBaseModel[MLXParakeetTDTProfile, MLXParakeetTDTSettings]):
     _MODEL_LABEL = "Parakeet TDT"
 
     def transcribe(self, frame: AudioFrame) -> Iterator[TranscriptionChunk]:

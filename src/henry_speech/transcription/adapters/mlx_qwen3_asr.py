@@ -7,7 +7,7 @@ from ..domain import TranscriptionChunk
 from .mlx_base import MLXBaseModel
 
 
-class Qwen3ASRModel(MLXBaseModel[Any, MLXQwen3ASRProfile, MLXQwen3ASRSettings]):
+class Qwen3ASRModel(MLXBaseModel[MLXQwen3ASRProfile, MLXQwen3ASRSettings]):
     _MODEL_LABEL = "Qwen3 ASR"
 
     def transcribe(self, frame: AudioFrame) -> Iterator[TranscriptionChunk]:

@@ -4,6 +4,8 @@ from pydantic import Field, field_validator
 
 from henry_common.validation import ConfigModel
 
+MLX_SILERO_VAD_MODEL_ID = "mlx-community/silero-vad"
+
 
 class VADSettings(ConfigModel):
     adapter: Literal[
@@ -14,10 +16,10 @@ class VADSettings(ConfigModel):
 
 
 class WakeWordProfile(ConfigModel):
-    model: str = Field(min_length=1)
+    model_path: str = Field(min_length=1)
     threshold: float = 0.75
 
-    @field_validator("model")
+    @field_validator("model_path")
     @classmethod
     def validate_model_extension(cls, value: str) -> str:
         if not value.endswith(".onnx"):

@@ -8,9 +8,7 @@ from ..config import MLXChatterboxProfile, MLXChatterboxSettings
 from .mlx_base import MLXBaseModel
 
 
-class MLXChatterboxModel(
-    MLXBaseModel[Any, MLXChatterboxProfile, MLXChatterboxSettings]
-):
+class MLXChatterboxModel(MLXBaseModel[MLXChatterboxProfile, MLXChatterboxSettings]):
     """Multilingual Chatterbox adapter backed by MLX-Audio."""
 
     _MODEL_LABEL = "MLX Chatterbox"

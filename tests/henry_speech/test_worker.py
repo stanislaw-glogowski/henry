@@ -24,12 +24,20 @@ from henry_conversation import (
     ReplyPhrase,
     UserTurn,
 )
-from henry_speech.audio import AudioFormat, AudioPlaybackOutcome
+from henry_speech.audio import (
+    AudioDevice,
+    AudioDevices,
+    AudioFormat,
+    AudioPlaybackOutcome,
+)
 from henry_speech.capture import DetectionResult, SpeechChunk
 from henry_speech.config import SpeechProfile, SpeechSettings
 from henry_speech.events import (
     InteractionTimingObserved,
+    ReplyPhraseDelivered,
+    ReplyPhrasePlaybackStarted,
     TranscriptionProgressObserved,
+    UserTurnCommitted,
 )
 from henry_speech.segmentation import SpeechSegment
 from henry_speech.transcription import TranscriptionChunk, TranscriptionText
@@ -156,6 +164,10 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
         with (
             bus.subscribe(GenerateReply) as requests,
             bus.subscribe(InteractionTimingObserved) as timings,
+            bus.subscribe(
+                ReplyPhrasePlaybackStarted,
+                ReplyPhraseDelivered,
+            ) as delivery,
         ):
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(
@@ -173,18 +185,38 @@ def test_worker_runs_activation_followup_synthesis_and_shutdown() -> None:
             timings.task_done()
             assert first_timing.stage == "turn_ready"
 
-            bus.publish(ReplyPhrase("Welcome"), ReplyGenerationCompleted())
+            bus.publish(
+                ReplyGenerationStarted(1),
+                ReplyPhrase(1, 1, "Welcome"),
+                ReplyGenerationCompleted(1),
+            )
             await asyncio.wait_for(playback.played.wait(), 1)
             playback.played.clear()
             assert len(playback.frames) == 1
+            started = await asyncio.wait_for(delivery.__anext__(), 1)
+            delivery.task_done()
+            delivered = await asyncio.wait_for(delivery.__anext__(), 1)
+            delivery.task_done()
+            assert started == ReplyPhrasePlaybackStarted(1, 1)
+            assert delivered == ReplyPhraseDelivered(1, 1)
 
             capture.queue.put_nowait(speech_chunk())
             turn = await asyncio.wait_for(requests.__anext__(), 1)
             requests.task_done()
             assert turn == GenerateReply(UserTurn("Question"))
 
-            bus.publish(ReplyPhrase("Answer"), ReplyGenerationCompleted())
+            bus.publish(
+                ReplyGenerationStarted(2),
+                ReplyPhrase(2, 1, "Answer"),
+                ReplyGenerationCompleted(2),
+            )
             await asyncio.wait_for(playback.played.wait(), 1)
+            started = await asyncio.wait_for(delivery.__anext__(), 1)
+            delivery.task_done()
+            delivered = await asyncio.wait_for(delivery.__anext__(), 1)
+            delivery.task_done()
+            assert started == ReplyPhrasePlaybackStarted(2, 1)
+            assert delivered == ReplyPhraseDelivered(2, 1)
 
             bus.publish(ShutdownEvent())
             await asyncio.wait_for(task, 1)
@@ -245,8 +277,13 @@ def test_worker_interrupts_active_reply_after_sustained_speech() -> None:
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
             await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 2), 1)
+            await asyncio.wait_for(_wait_until(lambda: capture.wakeword_enabled), 1)
             capture.queue.put_nowait(speech_chunk(wakeword=True))
-            bus.publish(ReplyGenerationStarted(), ReplyPhrase("Welcome"))
+            await asyncio.wait_for(
+                _wait_until(lambda: not capture.wakeword_enabled),
+                1,
+            )
+            bus.publish(ReplyGenerationStarted(1), ReplyPhrase(1, 1, "Welcome"))
             await asyncio.wait_for(playback.played.wait(), 1)
             await asyncio.wait_for(
                 _wait_until(lambda: worker._delivered_phrases == ["Welcome"]),
@@ -257,7 +294,8 @@ def test_worker_interrupts_active_reply_after_sustained_speech() -> None:
                 capture.queue.put_nowait(speech_chunk())
 
             assert await asyncio.wait_for(cancellations.__anext__(), 1) == CancelReply(
-                "Welcome"
+                "Welcome",
+                1,
             )
             cancellations.task_done()
             await asyncio.wait_for(
@@ -295,8 +333,13 @@ def test_worker_restores_playback_after_false_barge_in() -> None:
         task = asyncio.create_task(worker.run())
         await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
         await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 1), 1)
+        await asyncio.wait_for(_wait_until(lambda: capture.wakeword_enabled), 1)
         capture.queue.put_nowait(speech_chunk(wakeword=True))
-        bus.publish(ReplyGenerationStarted(), ReplyPhrase("Welcome"))
+        await asyncio.wait_for(
+            _wait_until(lambda: not capture.wakeword_enabled),
+            1,
+        )
+        bus.publish(ReplyGenerationStarted(1), ReplyPhrase(1, 1, "Welcome"))
         await asyncio.wait_for(playback.played.wait(), 1)
 
         capture.queue.put_nowait(speech_chunk())
@@ -362,10 +405,11 @@ def test_worker_combines_semantically_incomplete_transcription() -> None:
         with (
             bus.subscribe(GenerateReply) as requests,
             bus.subscribe(TranscriptionProgressObserved) as progress,
+            bus.subscribe(UserTurnCommitted) as committed,
         ):
             task = asyncio.create_task(worker.run())
             await asyncio.wait_for(_wait_until(lambda: capture.entered), 1)
-            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 3), 1)
+            await asyncio.wait_for(_wait_until(lambda: len(bus._subscriptions) == 4), 1)
             request = asyncio.create_task(requests.__anext__())
 
             capture.queue.put_nowait(speech_chunk())
@@ -375,12 +419,19 @@ def test_worker_combines_semantically_incomplete_transcription() -> None:
             first_progress = await asyncio.wait_for(progress.__anext__(), 1)
             progress.task_done()
             assert not first_progress.likely_complete
+            assert first_progress.turn_id == 1
 
             capture.queue.put_nowait(speech_chunk())
             assert await asyncio.wait_for(request, 1) == GenerateReply(
                 UserTurn("Chcę wiedzieć, ponieważ to jest ważne.")
             )
             requests.task_done()
+            committed_turn = await asyncio.wait_for(committed.__anext__(), 1)
+            committed.task_done()
+            assert committed_turn == UserTurnCommitted(
+                1,
+                "Chcę wiedzieć, ponieważ to jest ważne.",
+            )
 
             bus.publish(ShutdownEvent())
             await asyncio.wait_for(task, 1)
@@ -452,6 +503,10 @@ class FakeDriver(AbstractContextManager):
     def __init__(self) -> None:
         self.input = object()
         self.output = object()
+        self.devices = AudioDevices(
+            input=AudioDevice("Test microphone"),
+            output=AudioDevice("Test speakers"),
+        )
 
     def __enter__(self) -> Self:
         return self
@@ -482,8 +537,8 @@ def test_public_speech_runner_composes_services(
 
         monkeypatch.setattr(Worker, "run", fake_run)
         profile = SpeechProfile(
-            wakeword={"model": "wake.onnx"},
-            tts={"voice_path": "voice.onnx"},
+            wakeword={"model_path": "wake.onnx"},
+            tts={"model_path": "voice.onnx"},
         )
         settings = SpeechSettings()
         catalog = object()

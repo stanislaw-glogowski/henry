@@ -95,9 +95,11 @@ def test_configuration_domain_events_and_routing() -> None:
     assert mlx_value.models_mlx.fast.top_k == 12
     with pytest.raises(ValidationError, match="top_k"):
         _ = mlx_value.models_langchain
-    assert isinstance(ConversationSettings().model, LangChainSettings)
+    assert isinstance(ConversationSettings().language_model, MLXSettings)
     assert isinstance(
-        ConversationSettings.model_validate({"model": {"adapter": "mlx"}}).model,
+        ConversationSettings.model_validate(
+            {"language_model": {"adapter": "mlx"}}
+        ).language_model,
         MLXSettings,
     )
     with pytest.raises(ValidationError, match="model_id"):
@@ -132,10 +134,10 @@ def test_configuration_domain_events_and_routing() -> None:
     assert GenerateReply(activation).input == activation
     assert GenerateReply(turn).input == turn
     assert CancelReply() == CancelReply()
-    assert ReplyChunk("a").text == "a"
-    assert ReplyPhrase("line").text == "line"
-    assert ReplyGenerationStarted() == ReplyGenerationStarted()
-    assert ReplyGenerationCompleted() == ReplyGenerationCompleted()
+    assert ReplyChunk(1, "a").text == "a"
+    assert ReplyPhrase(1, 1, "line").text == "line"
+    assert ReplyGenerationStarted(1) == ReplyGenerationStarted(1)
+    assert ReplyGenerationCompleted(1) == ReplyGenerationCompleted(1)
 
     router = ResponseRouter()
     assert router.plan("").intent is TurnIntent.NO_RESPONSE
@@ -440,12 +442,12 @@ def test_worker_streams_chunks_phrases_and_inputs() -> None:
                 received.append(event)
                 replies.task_done()
             assert received == [
-                ReplyGenerationStarted(),
-                ReplyChunk("Hello\n"),
-                ReplyPhrase("Hello"),
-                ReplyChunk("world"),
-                ReplyPhrase("world"),
-                ReplyGenerationCompleted(),
+                ReplyGenerationStarted(1),
+                ReplyChunk(1, "Hello\n"),
+                ReplyPhrase(1, 1, "Hello"),
+                ReplyChunk(1, "world"),
+                ReplyPhrase(1, 2, "world"),
+                ReplyGenerationCompleted(1),
             ]
             bus.publish(GenerateReply(UserTurn("Question")))
             while not isinstance(
@@ -504,7 +506,7 @@ def test_worker_cancels_active_and_queued_replies() -> None:
         queued._graph_queue.put_nowait(UserTurn("Obsolete"))
         await queued._cancel_reply("")
         await queued._graph_queue.join()
-        await queued._stream(UserTurn("Next"))
+        await queued._stream(1, UserTurn("Next"))
         assert (
             "before any part was delivered"
             in (queued._graph.compiled.calls[0]["input"]["delivery_context"])
@@ -557,9 +559,10 @@ def test_worker_treats_profile_preparation_as_optional() -> None:
         await worker._prepare_profile()
         assert successful.called
 
-        failing = Preparation(RuntimeError("optional preparation failed"))
+        failing = Preparation(RuntimeError("profile preparation failed"))
         worker._profile_preparation = failing
-        await worker._prepare_profile()
+        with pytest.raises(RuntimeError, match="profile preparation failed"):
+            await worker._prepare_profile()
         assert failing.called
 
     asyncio.run(scenario())

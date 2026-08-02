@@ -11,10 +11,13 @@ from .events import (
     CancelReply,
     ConversationActivated,
     ConversationInput,
+    ConversationReady,
     GenerateReply,
     ReplyChunk,
+    ReplyDraftUpdated,
     ReplyGenerationCompleted,
     ReplyGenerationStarted,
+    ReplyId,
     ReplyPhrase,
     UserTurn,
 )
@@ -32,6 +35,7 @@ class Worker(Component):
         graph: ConversationGraph,
         context: ConversationContext,
         profile_preparation: ProfilePreparation | None = None,
+        start_event: asyncio.Event | None = None,
     ) -> None:
         super().__init__()
         self._event_bus = event_bus
@@ -42,6 +46,9 @@ class Worker(Component):
         self._active_reply: asyncio.Task[None] | None = None
         self._delivery_context = ""
         self._shutdown_event = asyncio.Event()
+        self._start_event = start_event
+        self._events_ready = asyncio.Event()
+        self._reply_sequence = 0
         self._logger.debug("INITIALIZED")
 
     async def run(self) -> None:
@@ -52,8 +59,12 @@ class Worker(Component):
                 group.create_task(self._events_loop()),
                 group.create_task(self._graph_loop()),
             ]
-            if self._profile_preparation is not None:
-                tasks.append(group.create_task(self._prepare_profile()))
+            await self._events_ready.wait()
+            await self._prepare_profile()
+            self._event_bus.publish(ConversationReady())
+
+            if self._start_event is not None:
+                await self._start_event.wait()
 
             await self._shutdown_event.wait()
             self._logger.debug("Canceling tasks")
@@ -65,12 +76,7 @@ class Worker(Component):
         preparation = self._profile_preparation
         if preparation is None:
             return
-        try:
-            await preparation.prepare()
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            self._logger.warning("Profile preparation FAILED: {}", error)
+        await preparation.prepare()
 
     async def _events_loop(self) -> None:
         with self._event_bus.subscribe(
@@ -78,6 +84,7 @@ class Worker(Component):
             GenerateReply,
             ShutdownEvent,
         ) as events:
+            self._events_ready.set()
             async for event in events:
                 try:
                     match event:
@@ -93,11 +100,12 @@ class Worker(Component):
     async def _graph_loop(self) -> None:
         while not self._shutdown_event.is_set():
             conversation_input = await self._graph_queue.get()
+            reply_id = self._next_reply_id()
 
             try:
-                self._event_bus.publish(ReplyGenerationStarted())
+                self._event_bus.publish(ReplyGenerationStarted(reply_id))
                 self._active_reply = asyncio.create_task(
-                    self._stream(conversation_input)
+                    self._stream(reply_id, conversation_input)
                 )
                 try:
                     await self._active_reply
@@ -107,7 +115,7 @@ class Worker(Component):
                         raise
             finally:
                 self._active_reply = None
-                self._event_bus.publish(ReplyGenerationCompleted())
+                self._event_bus.publish(ReplyGenerationCompleted(reply_id))
                 self._graph_queue.task_done()
 
     async def _cancel_reply(self, spoken_text: str) -> None:
@@ -135,7 +143,11 @@ class Worker(Component):
             "Do not assume the user heard it."
         )
 
-    async def _stream(self, conversation_input: ConversationInput) -> None:
+    async def _stream(
+        self,
+        reply_id: ReplyId,
+        conversation_input: ConversationInput,
+    ) -> None:
         delivery_context, self._delivery_context = self._delivery_context, ""
         match conversation_input:
             case ConversationActivated():
@@ -155,6 +167,7 @@ class Worker(Component):
             "configurable": {"thread_id": self.THREAD_ID},
         }
         segmenter = ReplySegmenter()
+        phrase_id = 0
 
         async for event in self._graph.compiled.astream(
             input=graph_input,
@@ -169,9 +182,31 @@ class Worker(Component):
             if not chunk:
                 continue
 
-            self._event_bus.publish(ReplyChunk(text=chunk))
+            self._event_bus.publish(ReplyChunk(reply_id=reply_id, text=chunk))
             for phrase in segmenter.feed(chunk):
-                self._event_bus.publish(ReplyPhrase(text=phrase))
+                phrase_id += 1
+                self._event_bus.publish(
+                    ReplyPhrase(
+                        reply_id=reply_id,
+                        phrase_id=phrase_id,
+                        text=phrase,
+                    )
+                )
+            self._event_bus.publish(
+                ReplyDraftUpdated(reply_id=reply_id, text=segmenter.draft)
+            )
 
         for phrase in segmenter.flush():
-            self._event_bus.publish(ReplyPhrase(text=phrase))
+            phrase_id += 1
+            self._event_bus.publish(
+                ReplyPhrase(
+                    reply_id=reply_id,
+                    phrase_id=phrase_id,
+                    text=phrase,
+                )
+            )
+        self._event_bus.publish(ReplyDraftUpdated(reply_id=reply_id, text=""))
+
+    def _next_reply_id(self) -> ReplyId:
+        self._reply_sequence += 1
+        return self._reply_sequence

@@ -1,12 +1,10 @@
 # Henry voice benchmark
 
-This benchmark provides repeatable comparisons of Polish STT, endpointing, and
-TTS. The text displayed during recording is the reference transcription. Model
-output is always stored separately.
+This benchmark provides repeatable comparisons of Polish STT, endpointing, and TTS. The text displayed during recording
+is the reference transcription. Model output is always stored separately.
 
-Recordings and results are stored below `$HENRY_HOME/benchmarks/voice`, the
-nearest `.henry/benchmarks/voice`, or the platform user-data directory. They are
-not part of the repository.
+Recordings and results are stored below `$HENRY_HOME/benchmarks/voice`, the nearest `.henry/benchmarks/voice`, or the
+platform user-data directory. They are not part of the repository.
 
 ## Recording
 
@@ -25,10 +23,9 @@ uv run python -m tools.voice_benchmark record \
   --condition quiet
 ```
 
-The recorder asks for a session directory name. Leave it blank to use a UTC
-timestamp. The prompt is then displayed for as long as the participant needs to
-prepare. Press Enter to start recording and Enter again to stop. Each take can
-be accepted, played, repeated, skipped, or left for a later resumed session.
+The recorder asks for a session directory name. Leave it blank to use a UTC timestamp. The prompt is then displayed for
+as long as the participant needs to prepare. Press Enter to start recording and Enter again to stop. Each take can be
+accepted, played, repeated, skipped, or left for a later resumed session.
 
 To avoid the interactive directory-name question, pass a name explicitly:
 
@@ -51,21 +48,20 @@ uv run python -m tools.voice_benchmark record \
   --resume
 ```
 
-Without `--session`, `--resume` selects the most recently modified session for
-the speaker and suite.
+Without `--session`, `--resume` selects the most recently modified session for the speaker and suite.
 
 Important options:
 
-| Option | Meaning |
-|---|---|
-| `--suite` | `pl-core`, `pl-turn-taking`, or `pl-tts` |
-| `--speaker` | Anonymous participant identifier |
+| Option        | Meaning                                                 |
+|---------------|---------------------------------------------------------|
+| `--suite`     | `pl-core`, `pl-turn-taking`, or `pl-tts`                |
+| `--speaker`   | Anonymous participant identifier                        |
 | `--condition` | For example `quiet`, `noise`, `far-field`, or `headset` |
-| `--driver` | `avfaudio`, or `pyaudio` for comparison |
-| `--prompt` | Record only one selected prompt |
-| `--session` | Session directory name |
-| `--resume` | Continue an existing session |
-| `--output` | Explicit benchmark data directory |
+| `--driver`    | `avfaudio`, or `pyaudio` for comparison                 |
+| `--prompt`    | Record only one selected prompt                         |
+| `--session`   | Session directory name                                  |
+| `--resume`    | Continue an existing session                            |
+| `--output`    | Explicit benchmark data directory                       |
 
 Each session directory contains:
 
@@ -77,14 +73,12 @@ recordings/pl-core/speaker-01/kitchen-morning/
 └── pl-short-002.wav
 ```
 
-`metadata.yml` is a blank, human-editable template for anonymous participant,
-room, device, and consent information. `manifest.jsonl` is maintained by the
-recorder and describes every accepted WAV, including its reference text, audio
+`metadata.yml` is a blank, human-editable template for anonymous participant, room, device, and consent information.
+`manifest.jsonl` is maintained by the recorder and describes every accepted WAV, including its reference text, audio
 format, duration, capture driver, and SHA-256 checksum.
 
-Files in `suites/` contain the exact Polish text to read. `pl-turn-taking` also
-contains pause instructions; instructions are not part of the reference
-transcription.
+Files in `suites/` contain the exact Polish text to read. `pl-turn-taking` also contains pause instructions;
+instructions are not part of the reference transcription.
 
 ## STT benchmark
 
@@ -110,9 +104,8 @@ uv run python -m tools.voice_benchmark stt \
   --output .henry/benchmarks/voice/results/whisper
 ```
 
-The runner writes JSONL and CSV containing the transcription, WER, CER,
-inference time, and real-time factor. The first model run may download missing
-weights.
+The runner writes JSONL and CSV containing the transcription, WER, CER, inference time, and real-time factor. The first
+model run may download missing weights.
 
 ## Endpointing
 
@@ -123,8 +116,7 @@ uv run python -m tools.voice_benchmark endpoint \
 ```
 
 The command replays each recording as frames through the production VAD and
-`UtteranceSegmenter`. Results include endpoint latency, detected utterance
-count, and premature endpoint detection.
+`UtteranceSegmenter`. Results include endpoint latency, detected utterance count, and premature endpoint detection.
 
 ## TTS benchmark
 
@@ -142,9 +134,8 @@ uv run python -m tools.voice_benchmark tts \
   --output .henry/benchmarks/voice/results/chatterbox
 ```
 
-Pronunciation, prosody, and naturalness require listening evaluation. Automated
-results measure model loading, time to first audio, total inference time, and
-real-time factor.
+Pronunciation, prosody, and naturalness require listening evaluation. Automated results measure model loading, time to
+first audio, total inference time, and real-time factor.
 
 ## Reports and blind listening
 
@@ -155,9 +146,8 @@ uv run python -m tools.voice_benchmark report \
   --results .henry/benchmarks/voice/results/parakeet
 ```
 
-A parent result directory may contain several adapter directories. The report
-command discovers direct result files and results in immediate child
-directories:
+A parent result directory may contain several adapter directories. The report command discovers direct result files and
+results in immediate child directories:
 
 ```bash
 uv run python -m tools.voice_benchmark report \
@@ -174,13 +164,11 @@ uv run python -m tools.voice_benchmark tts-review \
   --output .henry/benchmarks/voice/reviews/piper-vs-chatterbox
 ```
 
-The reviewer completes `ratings.csv` without opening `mapping.json`. Reveal the
-model mapping only after listening is complete.
+The reviewer completes `ratings.csv` without opening `mapping.json`. Reveal the model mapping only after listening is
+complete.
 
 ## Recording other people
 
-Use anonymous identifiers such as `speaker-02`. Do not store names, dates of
-birth, or contact information in metadata. Voice can be biometric data: obtain
-informed consent before recording another person, agree how the recordings will
-be stored and deleted, and obtain guardian consent for a child. Never commit or
-publish benchmark recordings.
+Use anonymous identifiers such as `speaker-02`. Do not store names, dates of birth, or contact information in metadata.
+Voice can be biometric data: obtain informed consent before recording another person, agree how the recordings will be
+stored and deleted, and obtain guardian consent for a child. Never commit or publish benchmark recordings.

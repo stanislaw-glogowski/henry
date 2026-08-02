@@ -58,7 +58,7 @@ class PiperModel(TTSModel):
 
         with disable_progress_bars():
             repo_id = self._profile.repo_id or self._settings.repo_id
-            filename = self._profile.voice_path
+            filename = self._profile.model_path
 
             self._logger.debug(
                 "Loading model: model_path='{}/{}'",

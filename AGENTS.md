@@ -22,7 +22,8 @@ unrelated changes. The hard architecture, testing, and change-discipline rules i
 - Package manager: uv
 - Runtime target: macOS on Apple Silicon
 - Application entrypoint: `henry-cli` or `python -m henry_cli`
-- The CLI has no runtime arguments. It loads the `default` profile and logs to the console.
+- The CLI has no runtime arguments. Its Textual UI validates and lists local profiles, starts the selected profile, and
+  exposes conversation progress, runtime information, telemetry, and logs.
 - Local data: `HENRY_HOME`, the nearest `.henry/`, or the platform data directory
 
 Use the following verification commands:
@@ -30,6 +31,7 @@ Use the following verification commands:
 ```bash
 UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff check hatch_build.py src tests tools
 UV_CACHE_DIR=/private/tmp/uv-cache uv run ruff format --check hatch_build.py src tests tools pyproject.toml
+UV_CACHE_DIR=/private/tmp/uv-cache uv run pyrefly check
 UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -q
 UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m compileall -q hatch_build.py src tests tools
 swift format lint --recursive native/macos/henry-audio
@@ -47,8 +49,8 @@ Use `uv sync` after dependency or lockfile changes.
   response generation, and reply segmentation.
 - `henry_resources` resolves and loads local profiles, prompt files, settings, and model paths. It must not assume the
   process cwd.
-- `henry_cli` is the only application composition root. It selects defaults, configures console logging, installs signal
-  handlers, and starts workers. It does not make conversation or speech decisions.
+- `henry_cli` is the only application composition root. It owns profile selection, the Textual UI, logging, progress,
+  signal handlers, and worker startup. It does not make conversation or speech decisions.
 - `henry_common` owns shared lifecycle, event-bus, logging, and validation primitives.
 
 One wake-word detection activates a voice session and follow-up utterances do not require another wake word. Speech
@@ -73,8 +75,12 @@ and maximum-duration rules. `TurnEndpointDetector` may join a semantically incom
 utterance; it must not start speculative language-model work.
 
 Conversation history and its summary are mutable graph state. Profile-derived model settings and prompts are immutable
-runtime context. The local CLI uses an in-memory checkpointer and `thread_id="default"`, so history lasts only for the
-current process.
+runtime context. The selected profile runs with an in-memory checkpointer and `thread_id="default"`, so history lasts
+only for the current process.
+
+The terminal UI is a read model built from domain events and telemetry. It may select a profile, present startup
+progress and errors, and request application shutdown, but it must not become a second source of conversation, speech,
+or device state. Audio devices and model workers start only after the user selects a valid profile.
 
 The profile contract is fixed:
 
@@ -125,6 +131,8 @@ await asyncio tasks before service contexts join their workers.
   devices.
 - Use fake implementations of ports with real asyncio queues and threads.
 - Use fake chat models for graph and streaming behavior.
+- Exercise the Textual UI headlessly; cover profile selection and validation, startup progress and retry, event-driven
+  state projection, navigation, logs, and shutdown without opening devices or loading models.
 - Synchronize with concrete events, queues, or futures and protect awaits with `asyncio.wait_for(...)`; do not use
   arbitrary sleeps.
 - Cover normal lifecycle, cancellation, startup/runtime error propagation, profile validation, graph routing,
@@ -154,8 +162,8 @@ Metal, and model validation remains a separate manual gate.
 ## Change discipline
 
 - Preserve unrelated user changes and inspect both staged and unstaged state.
-- Do not change wake-word session semantics, endpoint timing, the Ollama model, prompts, or audio formats as incidental
-  cleanup.
+- Do not change wake-word session semantics, endpoint timing, supplied adapters or models, prompts, or audio formats as
+  incidental cleanup.
 - Keep comments and docstrings minimal. Document public contracts, significant constants, and non-obvious concurrency;
   do not narrate straightforward implementation.
 - Keep spoken assistant output plain text and compatible with phrase-streamed TTS.

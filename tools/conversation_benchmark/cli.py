@@ -28,7 +28,7 @@ async def run(args: argparse.Namespace) -> tuple[Path, Path]:
     results = await run_benchmark(profile.conversation, settings, cases)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     output = args.output or profile.path.parents[1] / "benchmarks" / "conversation" / (
-        f"{args.profile}-{settings.model.adapter}-{timestamp}"
+        f"{args.profile}-{settings.language_model.adapter}-{timestamp}"
     )
     return write_report(output, results)
 

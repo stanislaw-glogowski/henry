@@ -18,7 +18,10 @@ class ConversationGraph:
         checkpointer: Checkpointer = None,
     ) -> None:
         # noinspection PyTypeChecker
-        builder = StateGraph(ConversationState, ConversationContext)
+        builder = StateGraph[Any, ConversationContext, Any, Any](
+            ConversationState,
+            ConversationContext,
+        )
 
         # noinspection PyTypeChecker
         builder.add_node(nodes.OPENING, nodes.opening)
@@ -44,5 +47,5 @@ class ConversationGraph:
     @property
     def compiled(
         self,
-    ) -> CompiledStateGraph[StateGraph, ConversationContext, Any, Any]:
+    ) -> CompiledStateGraph[Any, ConversationContext, Any, Any]:
         return self._compiled

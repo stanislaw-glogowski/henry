@@ -52,7 +52,7 @@ async def run_benchmark(
     results: list[BenchmarkResult] = []
     adapter = get_language_model(
         profile,
-        settings.model,
+        settings.language_model,
         require_classifier=settings.classify_ambiguous,
     )
     async with LanguageModelService(adapter) as service:

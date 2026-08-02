@@ -3,6 +3,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from huggingface_hub.utils import disable_progress_bars
+
 from ..config import MLXModelProfile, MLXModelsProfile
 from ..domain import LanguageModelChunk, LanguageModelRequest, LanguageModelRole
 from ..ports import LanguageModel
@@ -100,7 +102,8 @@ class MLXLanguageModel(LanguageModel):
             return loaded
         if self._load is None:
             raise RuntimeError("MLX language model adapter is not open")
-        model, tokenizer = self._load(model_id)
+        with disable_progress_bars():
+            model, tokenizer = self._load(model_id)
         loaded = _LoadedModel(model, tokenizer, {})
         self._models[model_id] = loaded
         self._logger.debug("Model LOADED: role='{}', model='{}'", role, model_id)

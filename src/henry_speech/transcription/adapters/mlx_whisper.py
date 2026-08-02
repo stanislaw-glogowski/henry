@@ -7,7 +7,7 @@ from ..domain import TranscriptionChunk
 from .mlx_base import MLXBaseModel
 
 
-class WhisperModel(MLXBaseModel[Any, MLXWhisperProfile, MLXWhisperSettings]):
+class WhisperModel(MLXBaseModel[MLXWhisperProfile, MLXWhisperSettings]):
     _MODEL_LABEL = "Whisper"
 
     def transcribe(self, frame: AudioFrame) -> Iterator[TranscriptionChunk]:

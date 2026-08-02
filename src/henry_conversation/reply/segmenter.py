@@ -46,6 +46,10 @@ class ReplySegmenter:
         self._buffer = ""
         return tuple(phrases)
 
+    @property
+    def draft(self) -> str:
+        return self._buffer.strip()
+
     def _extract(self) -> tuple[str, ...]:
         phrases: list[str] = []
         while (boundary := self._find_boundary()) is not None:

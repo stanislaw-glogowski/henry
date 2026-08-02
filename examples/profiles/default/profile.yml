@@ -1,21 +1,28 @@
-name: Henry
+name: Henry # name shown by the CLI
 
 conversation:
+  # Model parameters for the language-model adapter selected in settings.yml.
   models:
+    # Handles short, latency-sensitive responses and conversation summaries.
     fast:
-      model_id: "ollama:gpt-oss:20b"
-      max_tokens: 96
+      model_id: "mlx-community/Qwen3.5-4B-MLX-4bit" # Hugging Face model identifier
+      max_tokens: 128 # maximum number of generated tokens
+      temperature: 0.5 # sampling randomness from 0.0 to 2.0
+    # Handles responses that benefit from more generation capacity.
     detailed:
-      model_id: "ollama:gpt-oss:20b"
+      model_id: "mlx-community/Qwen3.5-4B-MLX-4bit"
       max_tokens: 256
+      temperature: 0.6
+    # Used only when conversation.classify_ambiguous is enabled in settings.yml.
     classifier:
-      model_id: "ollama:gpt-oss:20b"
+      model_id: "mlx-community/Qwen3.5-4B-MLX-4bit"
       max_tokens: 4
       temperature: 0.0
-  recent_messages: 8
+  recent_messages: 8 # recent messages supplied alongside the conversation summary
 
 wakeword:
-  model: "hey_henry.onnx"
+  model_path: "hey_henry.onnx" # ONNX file below models/openwakeword
 
 tts:
-  voice_path: "pl/pl_PL/bass/high/pl_PL-bass-high.onnx"
+  # Piper voice path inside the repository selected in settings.yml.
+  model_path: "pl/pl_PL/bass/high/pl_PL-bass-high.onnx"

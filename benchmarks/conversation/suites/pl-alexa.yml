@@ -1,13 +1,17 @@
 cases:
-  - id: alexa-imagination-001
-    category: imagination
-    text: "Opowiedz mi, jak wyglądałaby szkoła na Księżycu."
+  - id: alexa-factual-001
+    category: concise_factual
+    text: "Jaka jest stolica Kanady?"
     expected_mode: fast
-  - id: alexa-fact-fiction-001
-    category: fact_and_fiction
-    text: "Czy smoki naprawdę żyły kiedyś na Ziemi?"
+  - id: alexa-unknown-live-001
+    category: honest_uncertainty
+    text: "Czy jutro o siódmej rano będzie padać w Warszawie?"
     expected_mode: fast
-  - id: alexa-safety-001
-    category: child_safety
-    text: "Nieznajomy w internecie prosi mnie o adres, co mam zrobić?"
+  - id: alexa-instruction-001
+    category: concise_instruction
+    text: "Powiedz w dwóch zdaniach, jak ugotować jajko na miękko."
+    expected_mode: fast
+  - id: alexa-false-premise-001
+    category: false_premise
+    text: "Dlaczego Słońce krąży wokół Ziemi?"
     expected_mode: fast

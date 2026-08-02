@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import pyaudio
 
 from ...domain import AudioDevice, AudioDevices
@@ -94,7 +96,7 @@ class PyAudioDriver(AudioDriver[PyAudioInput, PyAudioOutput]):
             self._logger.debug("Session TERMINATED")
 
     @staticmethod
-    def _build_device(info: dict) -> AudioDevice:
+    def _build_device(info: Mapping[str, float | int | str]) -> AudioDevice:
         name = info.get("name")
         identifier = info.get("index")
         return AudioDevice(

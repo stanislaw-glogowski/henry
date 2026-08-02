@@ -34,10 +34,15 @@ not broaden a change merely to make surrounding code match these guidelines.
   settings, and model paths.
 - `henry_common` must contain only genuinely shared lifecycle, event, logging,
   and validation primitives.
-- `henry_cli` must remain the application composition root. Feature packages
-  may assemble their internal services behind explicit runner functions.
+- `henry_cli` must remain the application composition root. It owns profile
+  selection, terminal presentation, logging, model-loading progress, signal
+  handling, and worker startup. Feature packages may assemble their internal
+  services behind explicit runner functions.
 - A package must not make decisions owned by another domain. Speech may publish
   `ConversationActivated` or `UserTurn`; it must not choose graph nodes.
+- The terminal UI must remain a projection of domain events and telemetry. It
+  may request application lifecycle actions, but it must not become a second
+  source of conversation, speech, audio-device, or model state.
 
 ## Module layout
 
@@ -267,6 +272,18 @@ not broaden a change merely to make surrounding code match these guidelines.
 - Project code, errors, logs, comments, and documentation must be in English.
 - Polish is appropriate for benchmark source material, text intended to be
   spoken, and clearly marked language examples.
+- Keep `README.md` as the product entry point: purpose, supported platform,
+  quick start, observable behavior, high-level architecture, limitations, and
+  links to focused documentation.
+- Keep the settings/profile contract, adapter choices, and model setup in
+  `docs/configuration.md`. Do not duplicate their full reference in the README.
+- Keep benchmark procedures beside their committed suites and native-helper
+  details beside the Swift package.
+- Treat profile prompts as runtime product assets, not repository
+  documentation. Do not rewrite persona behavior during a documentation-only
+  change.
+- Verify documented commands, local links, paths, defaults, and configuration
+  fields against the current checkout.
 
 ## Testing
 
@@ -278,6 +295,10 @@ not broaden a change merely to make surrounding code match these guidelines.
   downloads, Ollama, or real PyAudio devices.
 - Test normal lifecycle, partial startup, runtime failure, cancellation, and
   shutdown.
+- Exercise Textual screens and widgets with the headless test harness. Cover
+  profile validation and selection, startup progress and retry, event-driven
+  state projection, navigation, logs, and shutdown without initializing
+  hardware or production models.
 - Synchronize concurrent tests with events, queues, or futures and protect waits
   with `asyncio.wait_for(...)`.
 - Do not use arbitrary sleeps as a synchronization mechanism.

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -73,6 +74,18 @@ class Profile(SpeechProfile):
         return tuple(line.strip() for line in content.splitlines() if line.strip())
 
 
+@dataclass(frozen=True, slots=True)
+class ProfileEntry:
+    id: str
+    name: str
+    profile: Profile | None = None
+    error: str | None = None
+
+    @property
+    def is_valid(self) -> bool:
+        return self.profile is not None
+
+
 class ProfileCatalog(ABC):
     _PROFILES_PATH = "profiles"
 
@@ -82,4 +95,8 @@ class ProfileCatalog(ABC):
 
     @abstractmethod
     def list_profiles(self) -> list[Profile]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def inspect_profiles(self) -> list[ProfileEntry]:
         raise NotImplementedError

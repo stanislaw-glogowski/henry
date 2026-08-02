@@ -23,7 +23,9 @@ dependencies = [
     "pyaudio>=0.2.14",
     "pydantic>=2.13.4",
     "pyyaml>=6.0.3",
+    "rich>=15.0.0",
     "soxr>=1.0.0",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]
@@ -35,7 +37,10 @@ dev = [
     "langgraph-cli[inmem]>=0.4.31",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pyrefly>=1.2.0",
     "ruff>=0.15.22",
+    "types-pyyaml>=6.0.12.20260724",
+    "types-pyaudio>=0.2.16.20260508",
 ]
 
 [build-system]
@@ -89,6 +94,17 @@ exclude_also = [
     "^\\s*\\.\\.\\.$",
     "raise NotImplementedError",
 ]
+
+[tool.pyrefly]
+check-unannotated-defs = true
+infer-return-types = "checked"
+preset = "default"
+project-includes = ["hatch_build.py", "src"]
+python-platform = "darwin"
+python-version = "3.14"
+replace-imports-with-any = ["mlx.core"]
+search-path = ["src"]
+use-ignore-files = true
 
 [tool.ruff]
 line-length = 88

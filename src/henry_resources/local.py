@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
 
+import yaml
 from platformdirs import user_data_dir
 
 from .models import ModelCatalog
-from .profiles import Profile, ProfileCatalog
+from .profiles import Profile, ProfileCatalog, ProfileEntry
 from .settings import Settings, SettingsStore
 
 
@@ -42,6 +43,34 @@ class LocalStore(ModelCatalog, ProfileCatalog, SettingsStore):
             if path.is_dir()
         ]
 
+    def inspect_profiles(self) -> list[ProfileEntry]:
+        if not self._profiles_path.is_dir():
+            return []
+
+        entries: list[ProfileEntry] = []
+        for path in sorted(self._profiles_path.iterdir()):
+            if not path.is_dir():
+                continue
+            try:
+                profile = Profile.load_from_directory(path)
+            except Exception as error:
+                entries.append(
+                    ProfileEntry(
+                        id=path.name,
+                        name=self._profile_name(path),
+                        error=str(error),
+                    )
+                )
+            else:
+                entries.append(
+                    ProfileEntry(
+                        id=profile.id,
+                        name=profile.name,
+                        profile=profile,
+                    )
+                )
+        return entries
+
     def load_settings(self) -> Settings:
         path = self._root_path / self._SETTINGS_FILE
         if not path.is_file():
@@ -63,3 +92,18 @@ class LocalStore(ModelCatalog, ProfileCatalog, SettingsStore):
                 return local
 
         return Path(user_data_dir(self._USER_DIR))
+
+    @staticmethod
+    def _profile_name(path: Path) -> str:
+        profile_path = path / "profile.yml"
+        if not profile_path.is_file():
+            return path.name
+        try:
+            data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        except OSError, yaml.YAMLError:
+            return path.name
+        if isinstance(data, dict) and isinstance(data.get("name"), str):
+            name = data["name"].strip()
+            if name:
+                return name
+        return path.name

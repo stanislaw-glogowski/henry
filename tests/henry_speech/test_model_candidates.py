@@ -203,7 +203,7 @@ def test_piper_adapter_contract(monkeypatch: pytest.MonkeyPatch) -> None:
 
     model = PiperModel(
         PiperProfile(
-            voice_path="pl/voice.onnx",
+            model_path="pl/voice.onnx",
             repo_id="profile/voices",
             speaker_id=2,
             length_scale=1.1,
@@ -250,9 +250,9 @@ def test_adapter_factories_validate_selected_profile() -> None:
     assert isinstance(stt, WhisperModel)
     assert isinstance(get_vad_model(object(), VADSettings()), SileroVADModel)
 
-    with pytest.raises(ValidationError, match="voice_path"):
+    with pytest.raises(ValidationError, match="model_path"):
         get_tts_model(
-            TTSProfile(tts={"voice_path": "voice.onnx"}),
+            TTSProfile(tts={"model_path": "voice.onnx"}),
             MLXChatterboxSettings(),
         )
     with pytest.raises(ValidationError, match="language"):
@@ -264,7 +264,7 @@ def test_adapter_factories_validate_selected_profile() -> None:
 
 def test_piper_profile_and_settings_validation() -> None:
     profile = PiperProfile(
-        voice_path="voice.onnx",
+        model_path="voice.onnx",
         speaker_id=2,
         length_scale=1.1,
         noise_scale=0.5,
@@ -272,10 +272,10 @@ def test_piper_profile_and_settings_validation() -> None:
     )
     settings = PiperSettings(normalize_audio=False, volume=0.8)
 
-    assert profile.voice_path == "voice.onnx"
+    assert profile.model_path == "voice.onnx"
     assert settings.repo_id == "rhasspy/piper-voices"
 
     with pytest.raises(ValidationError):
-        PiperProfile(voice_path="voice.onnx", speaker_id=-1)
+        PiperProfile(model_path="voice.onnx", speaker_id=-1)
     with pytest.raises(ValidationError):
         PiperSettings(volume=0.0)

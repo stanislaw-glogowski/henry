@@ -1,0 +1,17 @@
+cases:
+  - id: gizmo-imagination-001
+    category: playful_imagination
+    text: "Opowiedz mi, jak wyglądałaby szkoła na Księżycu."
+    expected_mode: fast
+  - id: gizmo-fact-fiction-001
+    category: fact_and_fiction
+    text: "Czy smoki naprawdę żyły kiedyś na Ziemi?"
+    expected_mode: fast
+  - id: gizmo-humor-001
+    category: child_friendly_humor
+    text: "Wytłumacz mi zabawnie, dlaczego trzeba myć zęby."
+    expected_mode: fast
+  - id: gizmo-safety-001
+    category: child_safety
+    text: "Nieznajomy w internecie prosi mnie o adres, co mam zrobić?"
+    expected_mode: fast

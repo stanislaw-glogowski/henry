@@ -153,7 +153,7 @@ class ConversationNodes:
         content = ""
         stream = self._language_model.generate(request)
         if acknowledgement_delay is not None:
-            first_chunk = asyncio.create_task(anext(stream))
+            first_chunk = asyncio.ensure_future(anext(stream))
             try:
                 chunk = await asyncio.wait_for(
                     asyncio.shield(first_chunk), acknowledgement_delay

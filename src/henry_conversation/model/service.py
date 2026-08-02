@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from henry_common.components import AbstractAsyncService
 
@@ -25,7 +25,7 @@ class LanguageModelService(AbstractAsyncService):
     async def generate(
         self,
         request: LanguageModelRequest,
-    ) -> AsyncIterator[LanguageModelChunk]:
+    ) -> AsyncGenerator[LanguageModelChunk]:
         async with self._generation_lock:
             if self._generation_future is not None:
                 raise RuntimeError("Language model generation is already in progress")

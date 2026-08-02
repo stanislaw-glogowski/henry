@@ -21,7 +21,7 @@ class PiperSettings(ConfigModel):
 
 
 class PiperProfile(ConfigModel):
-    voice_path: str = Field(
+    model_path: str = Field(
         min_length=1,
         default="en/en_US/lessac/medium/en_US-lessac-medium.onnx",
     )

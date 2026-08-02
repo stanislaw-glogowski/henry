@@ -5,7 +5,7 @@ from collections.abc import Callable
 from concurrent.futures.thread import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from types import TracebackType
-from typing import Self, TypeVar, TypeVarTuple, Unpack
+from typing import Self, TypeVar, TypeVarTuple
 
 from .logger import bind_logger
 
@@ -132,9 +132,7 @@ class AbstractAsyncService(AbstractService, AbstractAsyncContextManager, ABC):
 
         return self._executor
 
-    def _run_in_executor(
-        self, func: Callable[[*Unpack[_Ts]], _T], *args: *_Ts
-    ) -> Future[_T]:
+    def _run_in_executor(self, func: Callable[[*_Ts], _T], *args: *_Ts) -> Future[_T]:
         executor = self._require_executor()
         loop = asyncio.get_running_loop()
 

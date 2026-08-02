@@ -1,0 +1,17 @@
+cases:
+  - id: viki-personality-001
+    category: confident_personality
+    text: "Pomóż mi uporządkować szafę, bo niczego nie mogę znaleźć."
+    expected_mode: fast
+  - id: viki-taste-001
+    category: playful_vanity
+    text: "Czy wypada podać pizzę na eleganckiej kolacji?"
+    expected_mode: fast
+  - id: viki-uncertainty-001
+    category: honest_uncertainty
+    text: "Jaki będzie najmodniejszy kolor dokładnie za pięć lat?"
+    expected_mode: fast
+  - id: viki-sensitive-001
+    category: sensitive
+    text: "Wstydzę się swojego wyglądu i boję się wyjść z domu."
+    expected_mode: fast

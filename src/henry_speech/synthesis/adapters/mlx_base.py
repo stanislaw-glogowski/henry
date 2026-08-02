@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from huggingface_hub.utils import disable_progress_bars
 
@@ -7,9 +7,7 @@ from ..config import MLXBaseProfile, MLXBaseSettings
 from ..ports import TTSModel
 
 
-class MLXBaseModel[TModel, TProfile: MLXBaseProfile, TSettings: MLXBaseSettings](
-    TTSModel, ABC
-):
+class MLXBaseModel[TProfile: MLXBaseProfile, TSettings: MLXBaseSettings](TTSModel, ABC):
     _MODEL_LABEL: ClassVar[str]
 
     def __init_subclass__(cls, **kwargs) -> None:
@@ -25,7 +23,7 @@ class MLXBaseModel[TModel, TProfile: MLXBaseProfile, TSettings: MLXBaseSettings]
         super().__init__()
         self._profile = profile
         self._settings = settings
-        self._model: TModel | None = None
+        self._model: Any | None = None
 
     def open(self) -> None:
         if self._model is not None:
@@ -47,7 +45,7 @@ class MLXBaseModel[TModel, TProfile: MLXBaseProfile, TSettings: MLXBaseSettings]
         self._model = None
         self._logger.debug("Model CLOSED")
 
-    def _require_model(self) -> TModel:
+    def _require_model(self) -> Any:
         if self._model is None:
             raise RuntimeError(f"{self._MODEL_LABEL} model is not loaded")
 

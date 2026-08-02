@@ -1,39 +1,69 @@
 # Conversation benchmarks
 
-These benchmarks compare routing and language-model latency without requiring a
-microphone or speaker. The Polish suite is the only project file containing Polish
-benchmark utterances; implementation, reports, and documentation remain in English.
+These benchmarks measure response routing and language-model generation without opening a microphone, synthesizing
+speech, or starting the Henry application. Committed suites contain Polish inputs; implementation and reports remain in
+English.
 
-Select the adapter in `settings.yml`, make the requested profile contain model
-parameters for that adapter, and run:
+## Running a benchmark
+
+The default command uses the `default` profile, the conversation adapter from
+`settings.yml`, and `pl-core.yml`:
 
 ```bash
 uv run python -m tools.conversation_benchmark
 ```
 
-The same command runs the current LangChain baseline or an MLX candidate. Do not
-keep both providers' model identifiers in one profile.
+Select another local profile or committed suite explicitly:
 
-Use `pl-henry.yml` and `pl-alexa.yml` for profile-specific blind reviews. Henry
-should remain useful and stop joking in sensitive situations. Alexa should use
-child-friendly language, clearly separate fact from fiction, and protect the
-child's privacy without becoming frightening or patronizing.
+```bash
+uv run python -m tools.conversation_benchmark \
+  --profile default \
+  --suite benchmarks/conversation/suites/pl-henry.yml
+```
 
-The tool never downloads models explicitly. The selected adapter may resolve a
-missing model through its underlying library, so prepare the models before running
-an offline benchmark.
+Use `--output` to choose the result directory. Without it, results are written below the local Henry data root:
 
-Review the generated Markdown report together with `results.json`. Record warm and
-cold runs separately. Final acceptance also requires an end-to-end voice session,
-because model-only latency does not include transcription, phrase segmentation,
-synthesis, playback, or interruption.
+```text
+benchmarks/conversation/<profile>-<adapter>-<UTC-timestamp>/
+├── results.json
+└── report.md
+```
 
-Human reviewers should score each spoken response from 1 to 5 for correctness,
-naturalness, brevity, personality consistency, and conversational appropriateness.
-Compare randomized recordings produced with the same TTS voice.
+The selected profile must contain model parameters valid for the adapter in
+`settings.yml`. Direct MLX-LM inference is the supplied default; LangChain is an alternative for an Ollama-compatible
+endpoint. Do not keep fields unsupported by the selected adapter in one profile.
 
-Initial acceptance targets for the M1 Max are a fast first speakable phrase within
-0.8 seconds of final transcription, a waiting reaction within 0.6 seconds, a first
-substantive detailed phrase within 1.8 seconds, at least 90% routing accuracy, and
-an average human naturalness score of at least 4 out of 5. Treat these as provisional
-until the first repeatable hardware run establishes realistic baselines.
+The tool does not download models explicitly. The selected adapter may resolve missing weights through its underlying
+library, so prepare models before an offline run.
+
+## Suites
+
+- `pl-core.yml` checks general short and detailed response routing.
+- `pl-henry.yml` checks the supplied Henry persona.
+- `pl-alexa.yml`, `pl-gizmo.yml`, and `pl-viki.yml` support local persona comparisons; the suites do not install
+  matching runtime profiles.
+
+Persona suites should be reviewed against the profile they name. Henry should remain useful, vary his situational irony,
+and stop joking in sensitive situations. Alexa should answer briefly and admit uncertainty instead of guessing. Gizmo
+should be genuinely funny for a child while separating facts from fiction and protecting privacy. Viki should sound vain
+and polished without belittling the user or inventing a public life.
+
+## Measurements
+
+For each case, `results.json` records:
+
+- expected and selected response mode;
+- whether the case was the first, cold run or a subsequent warm run;
+- time to the first model chunk;
+- total generation time;
+- output length and complete text.
+
+`report.md` aggregates routing accuracy and provides a table for human review. Score correctness, naturalness, brevity,
+personality consistency, and conversational appropriateness from 1 to 5.
+
+Time to the first model chunk is not time to the first speakable phrase. This benchmark does not measure transcription,
+phrase segmentation, waiting reactions, synthesis, playback, or interruption. End-to-end latency and spoken quality
+require a real voice session, and TTS comparisons require randomized recordings and a blind listening review.
+
+Treat a routing accuracy target such as 90% as provisional until the suite is large enough and repeatable on the target
+machine. Keep cold and warm results separate when comparing adapters or models.

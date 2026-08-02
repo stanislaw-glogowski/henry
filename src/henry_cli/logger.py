@@ -1,9 +1,13 @@
 import sys
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    from loguru import Record
 
-def _ensure_component(record: dict) -> bool:
+
+def _ensure_component(record: Record) -> bool:
     record["extra"].setdefault("component", "Henry")
     return True
 
