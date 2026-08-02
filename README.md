@@ -156,6 +156,12 @@ Repository design and implementation conventions are documented in
 
 ## Development
 
+Run the conversation graph locally with LangGraph Studio:
+
+```bash
+uv run langgraph dev --allow-blocking
+```
+
 Run the complete automated verification:
 
 ```bash

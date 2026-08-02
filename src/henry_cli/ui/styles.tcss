@@ -13,7 +13,7 @@ Screen {
 }
 
 #header-bar {
-    height: 4;
+    height: 3;
     padding: 1 2 0 2;
     background: #0b1220;
     border-bottom: solid $henry-line;

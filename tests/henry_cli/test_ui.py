@@ -64,7 +64,10 @@ def test_dashboard_renderables_expose_runtime_and_conversation_states() -> None:
     header = HeaderBar()
     header.mode = state.mode
     header.profile_name = state.info.profile_name
-    assert "HENRY" in rendered(header.render())
+    rendered_header = rendered(header.render())
+    assert "HENRY" not in rendered_header
+    assert state.mode.value in rendered_header
+    assert state.info.profile_name in rendered_header
 
     telemetry = replace(
         state,

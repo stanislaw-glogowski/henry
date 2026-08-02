@@ -73,15 +73,11 @@ class HeaderBar(Static):
     profile_name = reactive("No profile")
 
     def render(self) -> Text:
-        title = Text(" H ", style="bold #08111f on #42d3c7")
-        title.append("  HENRY", style="bold #eef4ff")
-        title.append("  /  local voice intelligence", style="#64748b")
-        title.append("\n")
-        title.append(" \u25cf ", style=_MODE_STYLES[self.mode])
-        title.append(self.mode.value, style=_MODE_STYLES[self.mode])
-        title.append("  \u00b7  ", style="#465064")
-        title.append(self.profile_name, style="#b6c2d6")
-        return title
+        status = Text(" \u25cf ", style=_MODE_STYLES[self.mode])
+        status.append(self.mode.value, style=_MODE_STYLES[self.mode])
+        status.append("  \u00b7  ", style="#465064")
+        status.append(self.profile_name, style="#b6c2d6")
+        return status
 
 
 class SignalsPanel(Static):

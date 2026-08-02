@@ -848,11 +848,50 @@ def test_adapter_factory_and_public_runner(monkeypatch: pytest.MonkeyPatch) -> N
     asyncio.run(scenario())
 
 
-def test_studio_exports_compiled_graph() -> None:
-    from henry_conversation.studio import conversation_graph
+def test_studio_uses_default_profile_and_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import henry_conversation.studio as studio_module
+
+    conversation_profile = profile()
+    conversation_settings = ConversationSettings(classify_ambiguous=True)
+    fake_model = FakeLanguageModel()
+    calls: list[tuple[str, object, object, bool]] = []
+
+    class FakeStore:
+        def load_profile(self, profile_id: str) -> SimpleNamespace:
+            calls.append(("profile", profile_id, None, False))
+            return SimpleNamespace(conversation=conversation_profile)
+
+        def load_settings(self) -> SimpleNamespace:
+            calls.append(("settings", None, None, False))
+            return SimpleNamespace(conversation=conversation_settings)
+
+    def fake_get_language_model(
+        profile_value: ConversationProfile,
+        settings_value: object,
+        *,
+        require_classifier: bool = False,
+    ) -> FakeLanguageModel:
+        calls.append(
+            (
+                "adapter",
+                profile_value,
+                settings_value,
+                require_classifier,
+            )
+        )
+        return fake_model
+
+    monkeypatch.setattr(studio_module, "LocalStore", FakeStore)
+    monkeypatch.setattr(
+        studio_module,
+        "get_language_model",
+        fake_get_language_model,
+    )
 
     async def scenario() -> None:
-        async with conversation_graph() as graph:
+        async with studio_module.conversation_graph() as graph:
             assert set(graph.nodes) == {
                 "__start__",
                 "opening",
@@ -861,6 +900,16 @@ def test_studio_exports_compiled_graph() -> None:
             }
 
     asyncio.run(scenario())
+    assert calls == [
+        ("profile", "default", None, False),
+        ("settings", None, None, False),
+        (
+            "adapter",
+            conversation_profile,
+            conversation_settings.language_model,
+            True,
+        ),
+    ]
 
 
 async def _wait_until(predicate) -> None:

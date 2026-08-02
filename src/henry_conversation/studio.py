@@ -9,18 +9,10 @@ from henry_conversation.graph import (
     ConversationGraph,
     ConversationNodes,
 )
-from henry_conversation.model import LanguageModelService
-from henry_conversation.model.adapters.langchain import LangChainLanguageModel
-from henry_conversation.model.config import (
-    LangChainModelProfile,
-    LangChainModelsProfile,
-    LangChainSettings,
-)
+from henry_conversation.model import LanguageModelService, get_language_model
+from henry_resources import LocalStore
 
-_STUDIO_MODELS = LangChainModelsProfile(
-    fast=LangChainModelProfile(model_id="ollama:gpt-oss:20b"),
-    detailed=LangChainModelProfile(model_id="ollama:gpt-oss:20b"),
-)
+_DEFAULT_PROFILE_ID = "default"
 
 
 @asynccontextmanager
@@ -29,6 +21,13 @@ async def conversation_graph() -> AsyncGenerator[
 ]:
     """Own the model service for the lifetime of a LangGraph Studio run."""
 
-    adapter = LangChainLanguageModel(_STUDIO_MODELS, LangChainSettings())
+    store = LocalStore()
+    profile = store.load_profile(_DEFAULT_PROFILE_ID).conversation
+    settings = store.load_settings().conversation
+    adapter = get_language_model(
+        profile,
+        settings.language_model,
+        require_classifier=settings.classify_ambiguous,
+    )
     async with LanguageModelService(adapter) as service:
         yield ConversationGraph(nodes=ConversationNodes(service)).compiled
