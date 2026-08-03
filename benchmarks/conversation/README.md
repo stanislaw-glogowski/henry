@@ -4,6 +4,9 @@ These benchmarks measure response routing and language-model generation without 
 speech, or starting the Henry application. Committed suites contain Polish inputs; implementation and reports remain in
 English.
 
+The latest local model-selection decision and its limitations are documented in
+[the conversation model selection report](../../docs/benchmarks/conversation-model-selection.md).
+
 ## Running a benchmark
 
 The default command uses the `default` profile, the conversation adapter from
@@ -19,6 +22,15 @@ Select another local profile or committed suite explicitly:
 uv run python -m tools.conversation_benchmark \
   --profile default \
   --suite benchmarks/conversation/suites/pl-henry.yml
+```
+
+Override all model roles for a candidate comparison without editing the profile:
+
+```bash
+uv run python -m tools.conversation_benchmark \
+  --profile default \
+  --model-id mlx-community/gemma-4-26b-a4b-it-4bit \
+  --suite benchmarks/conversation/suites/pl-core.yml
 ```
 
 Use `--output` to choose the result directory. Without it, results are written below the local Henry data root:

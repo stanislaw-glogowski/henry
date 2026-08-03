@@ -8,6 +8,7 @@ from henry_conversation.config import ConversationSettings
 from henry_conversation.profile import ConversationProfile, ConversationPrompts
 from tests.support import FakeLanguageModel
 from tools.conversation_benchmark import cli as cli_module
+from tools.conversation_benchmark.cli import override_model_id
 from tools.conversation_benchmark.core import (
     BenchmarkCase,
     load_cases,
@@ -70,6 +71,33 @@ def test_conversation_benchmark_writes_empty_report(tmp_path: Path) -> None:
     assert "Routing accuracy: 0.0%" in markdown_path.read_text(encoding="utf-8")
 
 
+def test_conversation_benchmark_overrides_every_model_role() -> None:
+    profile = ConversationProfile(
+        models={
+            "fast": {"model_id": "fast"},
+            "detailed": {"model_id": "detailed"},
+            "classifier": {"model_id": "classifier"},
+        },
+        prompts=ConversationPrompts(
+            system="System",
+            opening="Opening",
+            summary="Summary",
+        ),
+    )
+
+    unchanged = override_model_id(profile, None)
+    overridden = override_model_id(profile, "candidate")
+
+    assert unchanged is profile
+    assert {
+        role: options["model_id"] for role, options in overridden.models.items()
+    } == {
+        "fast": "candidate",
+        "detailed": "candidate",
+        "classifier": "candidate",
+    }
+
+
 def test_conversation_benchmark_cli_uses_configured_adapter(
     monkeypatch,
     tmp_path: Path,
@@ -102,7 +130,10 @@ def test_conversation_benchmark_cli_uses_configured_adapter(
     asyncio.run(
         cli_module.run(
             SimpleNamespace(
-                profile="default", suite=tmp_path / "suite.yml", output=None
+                profile="default",
+                model_id=None,
+                suite=tmp_path / "suite.yml",
+                output=None,
             )
         )
     )
